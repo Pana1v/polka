@@ -1,0 +1,163 @@
+# ============================================================================
+# polka — multi-LiDAR fusion-filter node
+# ============================================================================
+#
+# Merges multiple LiDAR sources (any mix of PointCloud2 and LaserScan)
+# into a unified PointCloud2 and/or LaserScan.
+#
+# Quick start:
+#   1. Set output_frame_id to your robot's base frame
+#   2. List your sensors under source_names
+#   3. Fill in each source's topic and type
+#   4. Enable the outputs you need under "outputs"
+#   5. Launch:  ros2 launch polka polka.launch.py
+#
+# Each source needs a valid TF from its frame_id → output_frame_id.
+# ============================================================================
+
+polka:
+  ros__parameters:
+
+    # --------------------------------------------------
+    # General
+    # --------------------------------------------------
+
+    output_frame_id: "base_link"     # all sources are transformed into this frame
+    output_rate: 20.0                # Hz — how often merged output is published
+    source_timeout: 0.5              # seconds — drop source if no data within this window
+    timestamp_strategy: "earliest"   # "earliest" | "latest" | "average" | "local"
+    max_source_spread_warn: 0.05     # seconds — warn if source timestamps differ by more
+
+    # --------------------------------------------------
+    # Motion Compensation (velocity-based)
+    # --------------------------------------------------
+    # Corrects for robot motion between source timestamps.
+    # Uses first-order (constant velocity) approximation.
+    # Requires a velocity source (Odometry or TwistStamped).
+
+    motion_compensation:
+      enabled: false                       # set true to enable
+      velocity_topic: "~/odom"             # topic providing robot velocity
+      velocity_type: "odometry"            # "odometry" (nav_msgs/Odometry)
+                                           # or "twist_stamped" (geometry_msgs/TwistStamped)
+      max_velocity_age: 0.2                # seconds — ignore stale velocity data
+
+    # --------------------------------------------------
+    # Outputs — enable what you need
+    # --------------------------------------------------
+
+    outputs:
+
+      # Merged PointCloud2 output
+      cloud:
+        enabled: true
+        topic: "~/merged_cloud"
+        filters:                     # applied to the merged cloud before publishing
+          range:
+            enabled: false
+            min: 0.1                 # meters
+            max: 30.0
+          angular:
+            enabled: false
+            invert: false            # true = EXCLUDE the listed ranges
+            ranges: [0.0, 360.0]     # degrees — pairs of [start, end]
+          box:
+            enabled: false
+            x_min: -20.0             # meters (forward/backward)
+            x_max:  20.0
+            y_min: -20.0             # meters (left/right)
+            y_max:  20.0
+            z_min:  -2.0             # meters (down/up)
+            z_max:   5.0
+
+        # Height cap — clip output cloud to a z-range (in output frame)
+        height_cap:
+          enabled: false
+          z_min: -1.0                # meters — minimum height to keep
+          z_max:  3.0                # meters — maximum height to keep
+
+        # Voxel downsampling — reduces point density before publishing
+        voxel:
+          enabled: false
+          leaf_size: 0.05            # meters — uniform voxel size (overridden by leaf_x/y/z)
+          # leaf_x: 0.05             # per-axis leaf sizes (optional, override leaf_size)
+          # leaf_y: 0.05
+          # leaf_z: 0.10
+
+        # Self-filter — remove points hitting robot body (exclusion zones)
+        # Each named box defines an axis-aligned region (in output frame)
+        # where points are removed.
+        self_filter:
+          enabled: false
+          box_names: ["chassis", "sensor_mast"]
+          chassis:
+            x_min: -0.30
+            x_max:  0.30
+            y_min: -0.25
+            y_max:  0.25
+            z_min: -0.10
+            z_max:  0.50
+          sensor_mast:
+            x_min: -0.05
+            x_max:  0.05
+            y_min: -0.05
+            y_max:  0.05
+            z_min:  0.50
+            z_max:  1.20
+
+      # Merged LaserScan output (flattens 3D cloud → 2D scan)
+      scan:
+        enabled: true
+        topic: "~/merged_scan"
+        z_min: -0.10                 # meters — bottom of horizontal slice
+        z_max:  0.50                 # meters — top of horizontal slice
+        angle_min: -3.14159265       # radians (full 360°)
+        angle_max:  3.14159265
+        angle_increment: 0.00436332  # radians ≈ 0.25° per bin (1440 bins)
+        range_min: 0.10              # meters — ignore closer returns
+        range_max: 30.0              # meters — max scan range
+
+    # --------------------------------------------------
+    # Sources — list your sensors here
+    # --------------------------------------------------
+    # type: "pointcloud2" (3D LiDAR) or "laserscan" (2D LiDAR)
+
+    source_names: ["front_3d", "rear_2d"]
+
+    sources:
+
+      # 3D LiDAR (PointCloud2)
+      front_3d:
+        topic: "/front_lidar/points"
+        type: "pointcloud2"
+        qos_reliability: "best_effort"
+        qos_history_depth: 1
+        filters:
+          range:
+            enabled: true
+            min: 0.30                # ignore self-reflections within 30cm
+            max: 25.0
+          angular:
+            enabled: true
+            invert: false
+            ranges: [270.0, 90.0]    # front 180° (wraps around 0°)
+          box:
+            enabled: false
+
+      # 2D LiDAR (LaserScan — auto-converted to PointCloud2)
+      rear_2d:
+        topic: "/rear_lidar/scan"
+        type: "laserscan"
+        qos_reliability: "best_effort"
+        qos_history_depth: 1
+        filters:
+          range:
+            enabled: true
+            min: 0.20
+            max: 15.0
+          angular:
+            enabled: true
+            invert: false
+            ranges: [90.0, 270.0]    # rear 180°
+          box:
+            enabled: false

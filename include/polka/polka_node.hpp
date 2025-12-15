@@ -1,3 +1,17 @@
+// Copyright 2025 Panav Arpit Raaj <praajarpit@gmail.com>
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 #ifndef POLKA__POLKA_NODE_HPP_
 #define POLKA__POLKA_NODE_HPP_
 
@@ -28,12 +42,21 @@ public:
   explicit PolkaNode(const rclcpp::NodeOptions & options);
 
 private:
+  struct CachedVelocity {
+    double vx = 0.0, vy = 0.0, vz = 0.0;
+    double wx = 0.0, wy = 0.0, wz = 0.0;
+    rclcpp::Time stamp{0, 0, RCL_ROS_TIME};
+    bool valid = false;
+  };
+
   void output_callback();
   void publish_cloud(CloudT::ConstPtr cloud, const rclcpp::Time & stamp);
   void publish_scan(CloudT::ConstPtr cloud, const rclcpp::Time & stamp);
+  void publish_scan_from_ranges(const std::vector<float> & ranges, const rclcpp::Time & stamp);
+  PipelineConfig build_pipeline_config() const;
   rclcpp::Time compute_output_stamp(const std::vector<rclcpp::Time> & stamps);
   void build_output_filters();
-  void reconfigure();
+  bool reconfigure();
   void voxel_downsample(CloudT & cloud);
   void height_cap(CloudT & cloud);
 
@@ -41,7 +64,7 @@ private:
   void setup_velocity_subscriber();
   void odom_callback(nav_msgs::msg::Odometry::ConstSharedPtr msg);
   void twist_callback(geometry_msgs::msg::TwistStamped::ConstSharedPtr msg);
-  Eigen::Isometry3d compute_velocity_delta(double dt) const;
+  Eigen::Isometry3d compute_velocity_delta(const CachedVelocity & vel, double dt) const;
 
   MergeConfig config_;
 
@@ -70,12 +93,6 @@ private:
   rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub_;
   rclcpp::Subscription<geometry_msgs::msg::TwistStamped>::SharedPtr twist_sub_;
 
-  struct CachedVelocity {
-    double vx = 0.0, vy = 0.0, vz = 0.0;
-    double wx = 0.0, wy = 0.0, wz = 0.0;
-    rclcpp::Time stamp{0, 0, RCL_ROS_TIME};
-    bool valid = false;
-  };
   CachedVelocity cached_velocity_;
   mutable std::mutex velocity_mutex_;
 };

@@ -1,24 +1,36 @@
 # Polka
 
 <p align="center">
-  <img src="polka.png" alt="Polka" width="300"/>
+  <img src="images/polka.png" alt="Polka" width="300"/>
 </p>
 
-**Multi-LiDAR fusion node for ROS 2** — merges any mix of PointCloud2 and LaserScan sources into a unified output, with optional CUDA GPU acceleration.
+**Multi-LiDAR fusion node for ROS 2** that merges any mix of PointCloud2 and LaserScan sources into a unified output, with optional CUDA GPU acceleration.
 
-Polka replaces multi-node pipelines (relay → filter → transform → merge → downsample) with a single composable node.
+Polka replaces multi-node pipelines (relay -> filter -> transform -> merge -> downsample) with a single composable node, dramatically reducing latency, CPU overhead, and configuration complexity.
+
+## Why Polka?
+
+Managing multiple LiDAR sensors in ROS 2 typically requires a chain of separate nodes, each adding overhead, latency, and failure points. Polka collapses this entire pipeline into one composable node:
+
+- **Deep per-source filtering**: every sensor gets its own range, angular, and box filter pass before any data enters the merge stage, so you never waste bandwidth merging garbage
+- **Multi-modal merging**: fuse 3D PointCloud2 and 2D LaserScan sources together in a single merge step, no separate projection or relay nodes needed
+- **Unified output**: emit merged PointCloud2, LaserScan, or both simultaneously from a single node
+- **Rich output filtering**: after merge, apply range, angular, box, height filter, footprint filter (ego-body exclusion), and voxel downsampling in a defined, consistent order
+- **CUDA GPU acceleration**: the merge engine can run entirely on GPU with fused kernels and pre-allocated buffers, cutting merge latency significantly on sensor-dense platforms
+- **Motion compensation**: first-order velocity correction aligns scans from sensors with different timestamps, eliminating ghosting artifacts during robot motion
+- **TF2 integration**: transforms are resolved automatically, with fallback to the last known good transform so a momentary TF dropout does not drop the entire output
 
 ## Features
 
-- **Heterogeneous source fusion** — mix 3D PointCloud2 and 2D LaserScan sensors freely
-- **Dual output** — publish merged PointCloud2, LaserScan, or both simultaneously
-- **Per-source filtering** — range, angular, and box filters applied before merge
-- **Output filtering** — range, angular, box, height cap, self-filter (ego-body exclusion), voxel downsampling
-- **Motion compensation** — velocity-based correction for inter-scan time differences (Odometry or TwistStamped)
-- **CUDA acceleration** — optional GPU merge engine with fused kernels and pre-allocated buffers
-- **TF2 integration** — automatic transform lookup with fallback to last known good transform
-- **Fully parameterized** — every feature is runtime-configurable via ROS 2 parameters
-- **Composable node** — runs standalone or loaded into a component container
+- **Heterogeneous source fusion**: mix 3D PointCloud2 and 2D LaserScan sensors freely
+- **Dual output**: publish merged PointCloud2, LaserScan, or both simultaneously
+- **Per-source filtering**: range, angular, and box filters applied before merge
+- **Output filtering**: range, angular, box, height filter, footprint filter (ego-body exclusion), voxel downsampling
+- **Motion compensation**: velocity-based correction for inter-scan time differences (Odometry or TwistStamped)
+- **CUDA acceleration**: optional GPU merge engine with fused kernels and pre-allocated buffers
+- **TF2 integration**: automatic transform lookup with fallback to last known good transform
+- **Fully parameterized**: every feature is runtime-configurable via ROS 2 parameters
+- **Composable node**: runs standalone or loaded into a component container
 
 ## Dependencies
 
@@ -30,7 +42,7 @@ Polka replaces multi-node pipelines (relay → filter → transform → merge �
 | `tf2_ros` / `tf2_eigen` | Frame transforms |
 | `pcl_conversions` | PCL <-> ROS message conversion |
 | `laser_geometry` | LaserScan -> PointCloud2 projection |
-| CUDA toolkit | **Optional** — only needed for GPU merge engine |
+| CUDA toolkit | **Optional** -- only needed for GPU merge engine |
 
 ## Build
 
@@ -91,21 +103,21 @@ motion_compensation:
 Applied to the merged cloud before publishing, in this order:
 
 1. **Output filters** (range / angular / box)
-2. **Self-filter** — removes points inside robot body exclusion zones
-3. **Height cap** — clips to `[z_min, z_max]`
-4. **Voxel downsample** — reduces density via VoxelGrid
+2. **Footprint filter** -- removes points inside robot body exclusion zones
+3. **Height filter** -- clips to `[z_min, z_max]`
+4. **Voxel downsample** -- reduces density via VoxelGrid
 
 ```yaml
 outputs:
   cloud:
-    height_cap:
+    height_filter:
       enabled: true
       z_min: -1.0
       z_max: 3.0
     voxel:
       enabled: true
       leaf_size: 0.05
-    self_filter:
+    footprint_filter:
       enabled: true
       box_names: ["chassis"]
       chassis:
@@ -117,19 +129,104 @@ outputs:
         z_max:  0.50
 ```
 
+## Pipeline Comparison
+
+### polka (1 node)
+
+```mermaid
+graph LR
+    subgraph Drivers
+        D1[lidar driver · front]
+        D2[odom / cmd_vel]
+        D3[lidar driver · back]
+    end
+
+    P[<strong>polka</strong>]
+
+    subgraph Consumers
+        C1[mapping / reconstruction<br/>~/merged_cloud]
+        C2[localization / navigation<br/>~/merged_scan]
+    end
+
+    D1 --> P
+    D2 -.-> P
+    D3 --> P
+    P --> C1
+    P --> C2
+```
+
+### pcl_ros chain (7+ nodes)
+
+Cloud path:
+
+```mermaid
+graph LR
+    subgraph Drivers
+        D1[lidar driver · front]
+        D2[lidar driver · back]
+    end
+
+    CAT[pcl_ros::<br/>ConcatenatePointCloud<br/>+ ApproxTimeSynchronizer]
+    CF[custom node<br/>cloud filters]
+    MAP[mapping node]
+
+    D1 --> CAT
+    D2 --> CAT
+    CAT --> CF -->|merged_cloud| MAP
+```
+
+Scan path:
+
+```mermaid
+graph LR
+    subgraph Drivers
+        D1[lidar driver · front]
+        D2[lidar driver · back]
+    end
+
+    P2L1[pointcloud_to_laserscan<br/>· front]
+    P2L2[pointcloud_to_laserscan<br/>· back]
+    IRA[ira_laser_tools::<br/>LaserscanMerger]
+    SF[custom node<br/>scan filters]
+    NAV[localization / navigation]
+
+    D1 --> P2L1
+    D2 --> P2L2
+    P2L1 --> IRA
+    P2L2 --> IRA
+    IRA --> SF -->|merged_scan| NAV
+```
+
 ## Architecture
 
-```
-Sources (N sensors)          Merge Engine           Output Pipeline
-┌─────────────┐
-│ PointCloud2  │──► per-source ──►┐
-│ /front/points│    filters       │
-└─────────────┘                   │    ┌──────────┐    ┌────────────┐
-                                  ├───►│ CPU  or  │───►│ Filters    │──► PointCloud2
-┌─────────────┐                   │    │ CUDA     │    │ Self-filter│──► LaserScan
-│ LaserScan   │──► per-source ──►┘    │ merge    │    │ Height cap │
-│ /rear/scan  │    filters            └──────────┘    │ Voxel      │
-└─────────────┘                                       └────────────┘
+```mermaid
+graph LR
+    subgraph Sources
+        PC[PointCloud2<br/>/front/points]
+        LS[LaserScan<br/>/rear/scan]
+    end
+
+    subgraph Per-Source Filters
+        PF1[Range / Angular /<br/>Box Filter]
+        PF2[Range / Angular /<br/>Box Filter]
+    end
+
+    subgraph Merge Engine
+        ME[CPU or CUDA<br/>Merge]
+    end
+
+    subgraph Output Pipeline
+        OF[Range / Angular /<br/>Box Filter]
+        FF[Footprint Filter]
+        HF[Height Filter]
+        VX[Voxel Downsample]
+    end
+
+    PC --> PF1 --> ME
+    LS --> PF2 --> ME
+    ME --> OF --> FF --> HF --> VX
+    VX --> OUT_PC[PointCloud2]
+    VX --> OUT_LS[LaserScan]
 ```
 
 ## File Structure
@@ -137,6 +234,7 @@ Sources (N sensors)          Merge Engine           Output Pipeline
 ```
 polka/
 ├── config/example_params.yaml      # Full annotated config reference
+├── images/polka.png                # Project image
 ├── launch/polka.launch.py          # Launch file
 ├── include/polka/
 │   ├── polka_node.hpp              # Main composable node
@@ -147,7 +245,7 @@ polka/
 │   │   ├── i_filter.hpp            # Filter interface
 │   │   ├── range_filter.hpp        # Min/max distance filter
 │   │   ├── angular_filter.hpp      # Angular sector filter
-│   │   └── box_filter.hpp          # Axis-aligned box filter (+ invert for self-filter)
+│   │   └── box_filter.hpp          # Axis-aligned box filter (+ invert for footprint filter)
 │   └── merge_engine/
 │       ├── i_merge_engine.hpp      # Merge engine interface
 │       ├── cpu_merge_engine.hpp    # CPU merge implementation

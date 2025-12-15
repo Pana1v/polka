@@ -1,5 +1,5 @@
 # ============================================================================
-# polka — multi-LiDAR fusion-filter node
+# polka - multi-LiDAR fusion-filter node
 # ============================================================================
 #
 # Merges multiple LiDAR sources (any mix of PointCloud2 and LaserScan)
@@ -9,10 +9,10 @@
 #   1. Set output_frame_id to your robot's base frame
 #   2. List your sensors under source_names
 #   3. Fill in each source's topic and type
-#   4. Enable the outputs you need under "outputs"
+#   4. Enable the outputs you need
 #   5. Launch:  ros2 launch polka polka.launch.py
 #
-# Each source needs a valid TF from its frame_id → output_frame_id.
+# Each source needs a valid TF from its frame_id -> output_frame_id.
 # ============================================================================
 
 polka:
@@ -22,82 +22,89 @@ polka:
     # General
     # --------------------------------------------------
 
-    output_frame_id: "base_link"     # all sources are transformed into this frame
-    output_rate: 20.0                # Hz — how often merged output is published
-    source_timeout: 0.5              # seconds — drop source if no data within this window
+    output_frame_id: "base_link"     # all points are transformed into this frame
+    output_rate: 20.0                # Hz - merged output publish rate
+    source_timeout: 0.5              # seconds - drop source if no data within this window
+    enable_gpu: true                 # use CUDA GPU pipeline when available (falls back to CPU)
     timestamp_strategy: "earliest"   # "earliest" | "latest" | "average" | "local"
-    max_source_spread_warn: 0.05     # seconds — warn if source timestamps differ by more
+    max_source_spread_warn: 0.05     # seconds - warn if source timestamps differ by more
 
     # --------------------------------------------------
-    # Motion Compensation (velocity-based)
+    # Motion Compensation
     # --------------------------------------------------
-    # Corrects for robot motion between source timestamps.
-    # Uses first-order (constant velocity) approximation.
-    # Requires a velocity source (Odometry or TwistStamped).
+    # Corrects for robot motion between source timestamps using
+    # first-order (constant velocity) approximation.
+    # Requires a velocity source: Odometry or TwistStamped.
 
     motion_compensation:
-      enabled: false                       # set true to enable
-      velocity_topic: "~/odom"             # topic providing robot velocity
-      velocity_type: "odometry"            # "odometry" (nav_msgs/Odometry)
-                                           # or "twist_stamped" (geometry_msgs/TwistStamped)
-      max_velocity_age: 0.2                # seconds — ignore stale velocity data
+      enabled: false
+      velocity_topic: "~/odom"       # topic providing robot velocity
+      velocity_type: "odometry"      # "odometry" (nav_msgs/Odometry)
+                                     # or "twist_stamped" (geometry_msgs/TwistStamped)
+      max_velocity_age: 0.2          # seconds - ignore stale velocity data
 
     # --------------------------------------------------
-    # Outputs — enable what you need
+    # Outputs
     # --------------------------------------------------
 
     outputs:
 
-      # Merged PointCloud2 output
+      # === Merged PointCloud2 ===
       cloud:
         enabled: true
         topic: "~/merged_cloud"
-        filters:                     # applied to the merged cloud before publishing
+
+        # Post-merge filters (applied to the merged cloud before publishing)
+        # All filters are independent and applied in this order:
+        #   range -> angular -> box -> height filter -> footprint filter -> voxel
+        filters:
+
+          # Range filter - keep points within a spherical distance from the origin
           range:
             enabled: false
-            min: 0.1                 # meters
-            max: 30.0
+            min: 0.1                 # meters - minimum distance
+            max: 30.0                # meters - maximum distance
+
+          # Angular filter - keep or exclude points by horizontal angle (yaw)
+          # Angles are in degrees, measured counter-clockwise from +X axis (0 = forward)
+          # Ranges are [start, end] pairs; multiple pairs can be specified
           angular:
             enabled: false
-            invert: false            # true = EXCLUDE the listed ranges
-            ranges: [0.0, 360.0]     # degrees — pairs of [start, end]
+            invert: false            # false = KEEP listed ranges, true = EXCLUDE them
+            ranges: [0.0, 360.0]     # degrees - pairs of [start, end]
+
+          # Box filter - keep points within an axis-aligned bounding box
           box:
             enabled: false
-            x_min: -20.0             # meters (forward/backward)
+            x_min: -20.0             # meters (behind / forward)
             x_max:  20.0
-            y_min: -20.0             # meters (left/right)
+            y_min: -20.0             # meters (right / left)
             y_max:  20.0
-            z_min:  -2.0             # meters (down/up)
+            z_min:  -2.0             # meters (below / above)
             z_max:   5.0
 
-        # Height cap — clip output cloud to a z-range (in output frame)
+        # Height filter - clip the output cloud to a z-range (in output frame)
+        # Useful for removing ground and overhead points
         height_cap:
           enabled: false
-          z_min: -1.0                # meters — minimum height to keep
-          z_max:  3.0                # meters — maximum height to keep
+          z_min: -1.0                # meters - lowest point to keep
+          z_max:  3.0                # meters - highest point to keep
 
-        # Voxel downsampling — reduces point density before publishing
-        voxel:
-          enabled: false
-          leaf_size: 0.05            # meters — uniform voxel size (overridden by leaf_x/y/z)
-          # leaf_x: 0.05             # per-axis leaf sizes (optional, override leaf_size)
-          # leaf_y: 0.05
-          # leaf_z: 0.10
-
-        # Self-filter — remove points hitting robot body (exclusion zones)
-        # Each named box defines an axis-aligned region (in output frame)
-        # where points are removed.
+        # Footprint filter - remove points that hit the robot body
+        # Define one or more axis-aligned exclusion boxes (in output frame).
+        # Any point inside ANY box is removed. Name each box in box_names
+        # and define its bounds below.
         self_filter:
           enabled: false
           box_names: ["chassis", "sensor_mast"]
-          chassis:
+          chassis:                   # main robot body
             x_min: -0.30
             x_max:  0.30
             y_min: -0.25
             y_max:  0.25
             z_min: -0.10
             z_max:  0.50
-          sensor_mast:
+          sensor_mast:               # vertical pole holding sensors
             x_min: -0.05
             x_max:  0.05
             y_min: -0.05
@@ -105,59 +112,87 @@ polka:
             z_min:  0.50
             z_max:  1.20
 
-      # Merged LaserScan output (flattens 3D cloud → 2D scan)
+        # Voxel downsampling - reduce point density uniformly
+        # Set leaf_size for uniform voxels, or leaf_x/y/z for per-axis control
+        voxel:
+          enabled: false
+          leaf_size: 0.05            # meters - uniform voxel size
+          # leaf_x: 0.05             # per-axis overrides (take priority over leaf_size)
+          # leaf_y: 0.05
+          # leaf_z: 0.10
+
+      # === Merged LaserScan ===
+      # Flattens the merged 3D cloud into a 2D scan (closest point per angular bin)
       scan:
         enabled: true
         topic: "~/merged_scan"
-        z_min: -0.10                 # meters — bottom of horizontal slice
-        z_max:  0.50                 # meters — top of horizontal slice
-        angle_min: -3.14159265       # radians (full 360°)
-        angle_max:  3.14159265
-        angle_increment: 0.00436332  # radians ≈ 0.25° per bin (1440 bins)
-        range_min: 0.10              # meters — ignore closer returns
-        range_max: 30.0              # meters — max scan range
+        z_min: -0.10                 # meters - bottom of horizontal slice
+        z_max:  0.50                 # meters - top of horizontal slice
+        angle_min: -3.14159265       # radians - scan start angle (full 360)
+        angle_max:  3.14159265       # radians - scan end angle
+        angle_increment: 0.00436332  # radians per bin (0.25 degrees = 1440 bins)
+        range_min: 0.10              # meters - minimum valid range
+        range_max: 30.0              # meters - maximum valid range
 
     # --------------------------------------------------
-    # Sources — list your sensors here
+    # Sources
     # --------------------------------------------------
-    # type: "pointcloud2" (3D LiDAR) or "laserscan" (2D LiDAR)
+    # Each source is an independent LiDAR input.
+    #   type: "pointcloud2" (3D LiDAR) or "laserscan" (2D LiDAR)
+    #
+    # Per-source filters run BEFORE merging, in each sensor's own frame.
+    # This lets you crop irrelevant data early (less work for the merge step).
+    # Available per-source filters: range, angular, box
+    # (same parameters as the output filters above)
 
     source_names: ["front_3d", "rear_2d"]
 
     sources:
 
-      # 3D LiDAR (PointCloud2)
+      # --- 3D LiDAR (PointCloud2) ---
       front_3d:
         topic: "/front_lidar/points"
         type: "pointcloud2"
-        qos_reliability: "best_effort"
+        qos_reliability: "best_effort"   # "best_effort" or "reliable"
         qos_history_depth: 1
         filters:
+          # Drop self-reflections too close to the sensor
           range:
             enabled: true
-            min: 0.30                # ignore self-reflections within 30cm
+            min: 0.30                # meters - ignore returns within 30 cm
             max: 25.0
+          # Keep only the front 180 degrees
           angular:
             enabled: true
             invert: false
-            ranges: [270.0, 90.0]    # front 180° (wraps around 0°)
+            ranges: [270.0, 90.0]    # wraps around 0 to cover front hemisphere
+          # Not using box filter on this source
           box:
             enabled: false
 
-      # 2D LiDAR (LaserScan — auto-converted to PointCloud2)
+      # --- 2D LiDAR (LaserScan, auto-converted to PointCloud2) ---
       rear_2d:
         topic: "/rear_lidar/scan"
         type: "laserscan"
         qos_reliability: "best_effort"
         qos_history_depth: 1
         filters:
+          # Tighter range for the rear sensor
           range:
             enabled: true
             min: 0.20
             max: 15.0
+          # Keep only the rear 180 degrees
           angular:
             enabled: true
             invert: false
-            ranges: [90.0, 270.0]    # rear 180°
+            ranges: [90.0, 270.0]    # rear hemisphere
+          # Example: crop to a box behind the robot (disabled here)
           box:
             enabled: false
+            # x_min: -5.0
+            # x_max:  0.0
+            # y_min: -3.0
+            # y_max:  3.0
+            # z_min: -1.0
+            # z_max:  2.0

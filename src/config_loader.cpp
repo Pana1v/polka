@@ -1,3 +1,17 @@
+// Copyright 2025 Panav Arpit Raaj <praajarpit@gmail.com>
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 #include "polka/config_loader.hpp"
 #include <stdexcept>
 #include <cmath>
@@ -15,6 +29,7 @@ void ConfigLoader::declare_defaults()
   node_->declare_parameter<std::string>("output_frame_id", "base_link");
   node_->declare_parameter<double>("output_rate", 20.0);
   node_->declare_parameter<double>("source_timeout", 0.5);
+  node_->declare_parameter<bool>("enable_gpu", true);
   node_->declare_parameter<std::string>("timestamp_strategy", "earliest");
   node_->declare_parameter<double>("max_source_spread_warn", 0.05);
 
@@ -111,6 +126,7 @@ MergeConfig ConfigLoader::load()
   cfg.output_frame_id = node_->get_parameter("output_frame_id").as_string();
   cfg.output_rate = node_->get_parameter("output_rate").as_double();
   cfg.source_timeout = node_->get_parameter("source_timeout").as_double();
+  cfg.enable_gpu = node_->get_parameter("enable_gpu").as_bool();
   cfg.max_source_spread_warn = node_->get_parameter("max_source_spread_warn").as_double();
 
   auto ts_str = node_->get_parameter("timestamp_strategy").as_string();
@@ -221,6 +237,7 @@ MergeConfig ConfigLoader::reload(const std::vector<std::string> & source_names)
   cfg.output_frame_id = node_->get_parameter("output_frame_id").as_string();
   cfg.output_rate = node_->get_parameter("output_rate").as_double();
   cfg.source_timeout = node_->get_parameter("source_timeout").as_double();
+  cfg.enable_gpu = node_->get_parameter("enable_gpu").as_bool();
   cfg.max_source_spread_warn = node_->get_parameter("max_source_spread_warn").as_double();
 
   auto ts_str = node_->get_parameter("timestamp_strategy").as_string();
@@ -312,6 +329,7 @@ MergeConfig ConfigLoader::reload(const std::vector<std::string> & source_names)
     cfg.sources.push_back(std::move(sc));
   }
 
+  validate(cfg);
   return cfg;
 }
 
@@ -354,6 +372,13 @@ void ConfigLoader::validate(const MergeConfig & config)
     throw std::runtime_error("polka: source_timeout must be > 0");
   if (!config.cloud_output.enabled && !config.scan_output.enabled)
     throw std::runtime_error("polka: at least one output (cloud or scan) must be enabled");
+  if (config.cloud_output.voxel.enabled) {
+    if (config.cloud_output.voxel.leaf_x <= 0.0f ||
+        config.cloud_output.voxel.leaf_y <= 0.0f ||
+        config.cloud_output.voxel.leaf_z <= 0.0f)
+      throw std::runtime_error(
+        "polka: voxel filter enabled but leaf size is <= 0 (would crash pcl::VoxelGrid)");
+  }
   for (const auto & src : config.sources) {
     if (src.topic.empty())
       throw std::runtime_error("polka: source '" + src.name + "' has empty topic");

@@ -1,3 +1,17 @@
+// Copyright 2025 Panav Arpit Raaj <praajarpit@gmail.com>
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 #include "polka/polka_node.hpp"
 #include "polka/merge_engine/cpu_merge_engine.hpp"
 #include "polka/filters/range_filter.hpp"
@@ -15,10 +29,11 @@
 
 #include <rcl_interfaces/msg/set_parameters_result.hpp>
 
-#include <chrono>
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <functional>
+#include <limits>
 
 namespace polka {
 
@@ -31,16 +46,21 @@ PolkaNode::PolkaNode(const rclcpp::NodeOptions & options)
   tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
 
 #ifdef POLKA_CUDA_ENABLED
-  int device_count = 0;
-  cudaGetDeviceCount(&device_count);
-  if (device_count > 0) {
-    merge_engine_ = std::make_unique<CudaMergeEngine>(config_);
+  if (config_.enable_gpu) {
+    int device_count = 0;
+    cudaGetDeviceCount(&device_count);
+    if (device_count > 0) {
+      merge_engine_ = std::make_unique<CudaMergeEngine>(config_);
+    } else {
+      RCLCPP_WARN(get_logger(), "enable_gpu=true but no CUDA device found, falling back to CPU");
+    }
   }
 #endif
   if (!merge_engine_)
     merge_engine_ = std::make_unique<CpuMergeEngine>();
-  RCLCPP_INFO(get_logger(), "using %s merge engine",
-    merge_engine_->is_gpu() ? "GPU" : "CPU");
+  RCLCPP_INFO(get_logger(), "using %s merge engine%s",
+    merge_engine_->is_gpu() ? "GPU (full pipeline)" : "CPU",
+    merge_engine_->is_gpu() ? "" : " (set enable_gpu:=true for GPU acceleration)");
 
   if (config_.motion_compensation.enabled)
     setup_velocity_subscriber();
@@ -72,8 +92,7 @@ PolkaNode::PolkaNode(const rclcpp::NodeOptions & options)
   param_cb_ = add_on_set_parameters_callback(
     [this](const std::vector<rclcpp::Parameter> &) {
       rcl_interfaces::msg::SetParametersResult result;
-      result.successful = true;
-      reconfigure();
+      result.successful = reconfigure();
       return result;
     });
 }
@@ -159,12 +178,27 @@ void PolkaNode::output_callback()
 
   // Pass 2: Apply velocity compensation and build MergeInputs
   bool do_compensate = false;
+  CachedVelocity velocity_snapshot;
   if (config_.motion_compensation.enabled) {
     std::lock_guard<std::mutex> lock(velocity_mutex_);
     if (cached_velocity_.valid) {
       double vel_age = (now - cached_velocity_.stamp).seconds();
       if (vel_age <= config_.motion_compensation.max_velocity_age) {
-        do_compensate = true;
+        constexpr double kMaxLinearVel = 50.0;   // m/s
+        constexpr double kMaxAngularVel = 10.0;  // rad/s
+        if (std::abs(cached_velocity_.vx) > kMaxLinearVel ||
+            std::abs(cached_velocity_.vy) > kMaxLinearVel ||
+            std::abs(cached_velocity_.vz) > kMaxLinearVel ||
+            std::abs(cached_velocity_.wx) > kMaxAngularVel ||
+            std::abs(cached_velocity_.wy) > kMaxAngularVel ||
+            std::abs(cached_velocity_.wz) > kMaxAngularVel) {
+          RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 2000,
+            "velocity exceeds sanity bounds (lin>%.0f m/s or ang>%.0f rad/s), "
+            "skipping compensation", kMaxLinearVel, kMaxAngularVel);
+        } else {
+          velocity_snapshot = cached_velocity_;
+          do_compensate = true;
+        }
       } else {
         RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 5000,
           "velocity data stale (%.3f s), skipping compensation", vel_age);
@@ -179,28 +213,41 @@ void PolkaNode::output_callback()
     if (do_compensate) {
       double dt = (sd.stamp - output_stamp).seconds();
       if (std::abs(dt) > 1e-6) {
-        std::lock_guard<std::mutex> lock(velocity_mutex_);
-        Eigen::Isometry3d delta = compute_velocity_delta(dt);
+        Eigen::Isometry3d delta = compute_velocity_delta(velocity_snapshot, dt);
         final_transform = delta * sd.transform;
       }
     }
     inputs.push_back({sd.cloud, final_transform, sd.filter_params});
   }
 
-  auto merged = merge_engine_->merge(inputs);
-  if (!merged || merged->empty()) return;
+  if (merge_engine_->is_gpu()) {
+    // Full GPU pipeline: merge + filters + voxel + flatten all on device
+    auto pcfg = build_pipeline_config();
+    auto result = merge_engine_->merge_pipeline(inputs, pcfg);
+    if (!result.cloud || result.cloud->empty()) return;
 
-  for (auto & filter : output_filters_)
-    filter->apply(*merged, config_.output_frame_id);
+    if (cloud_pub_) publish_cloud(result.cloud, output_stamp);
+    if (scan_pub_ && !result.scan_ranges.empty())
+      publish_scan_from_ranges(result.scan_ranges, output_stamp);
+    else if (scan_pub_)
+      publish_scan(result.cloud, output_stamp);
+  } else {
+    // CPU path: merge then post-process on CPU
+    auto merged = merge_engine_->merge(inputs);
+    if (!merged || merged->empty()) return;
 
-  if (config_.cloud_output.height_cap.enabled)
-    height_cap(*merged);
+    for (auto & filter : output_filters_)
+      filter->apply(*merged, config_.output_frame_id);
 
-  if (config_.cloud_output.voxel.enabled)
-    voxel_downsample(*merged);
+    if (config_.cloud_output.height_cap.enabled)
+      height_cap(*merged);
 
-  if (cloud_pub_) publish_cloud(merged, output_stamp);
-  if (scan_pub_) publish_scan(merged, output_stamp);
+    if (config_.cloud_output.voxel.enabled)
+      voxel_downsample(*merged);
+
+    if (cloud_pub_) publish_cloud(merged, output_stamp);
+    if (scan_pub_) publish_scan(merged, output_stamp);
+  }
 }
 
 rclcpp::Time PolkaNode::compute_output_stamp(const std::vector<rclcpp::Time> & stamps)
@@ -250,8 +297,9 @@ void PolkaNode::publish_scan(CloudT::ConstPtr cloud, const rclcpp::Time & stamp)
   scan.range_min = r_min;
   scan.range_max = r_max;
   scan.time_increment = 0.0f;
-  scan.scan_time = 0.0f;
-  scan.ranges.assign(n, r_max);
+  scan.scan_time = (config_.output_rate > 0.0)
+    ? 1.0f / static_cast<float>(config_.output_rate) : 0.0f;
+  scan.ranges.assign(n, std::numeric_limits<float>::infinity());
 
   for (const auto & p : *cloud) {
     if (p.z < z_min || p.z > z_max) continue;
@@ -291,40 +339,52 @@ void PolkaNode::setup_velocity_subscriber()
 
 void PolkaNode::odom_callback(nav_msgs::msg::Odometry::ConstSharedPtr msg)
 {
+  const auto & t = msg->twist.twist;
+  if (!std::isfinite(t.linear.x) || !std::isfinite(t.linear.y) || !std::isfinite(t.linear.z) ||
+      !std::isfinite(t.angular.x) || !std::isfinite(t.angular.y) || !std::isfinite(t.angular.z)) {
+    RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 1000,
+      "motion compensation: non-finite velocity in odometry, ignoring");
+    return;
+  }
   std::lock_guard<std::mutex> lock(velocity_mutex_);
-  cached_velocity_.vx = msg->twist.twist.linear.x;
-  cached_velocity_.vy = msg->twist.twist.linear.y;
-  cached_velocity_.vz = msg->twist.twist.linear.z;
-  cached_velocity_.wx = msg->twist.twist.angular.x;
-  cached_velocity_.wy = msg->twist.twist.angular.y;
-  cached_velocity_.wz = msg->twist.twist.angular.z;
+  cached_velocity_.vx = t.linear.x;
+  cached_velocity_.vy = t.linear.y;
+  cached_velocity_.vz = t.linear.z;
+  cached_velocity_.wx = t.angular.x;
+  cached_velocity_.wy = t.angular.y;
+  cached_velocity_.wz = t.angular.z;
   cached_velocity_.stamp = rclcpp::Time(msg->header.stamp);
   cached_velocity_.valid = true;
 }
 
 void PolkaNode::twist_callback(geometry_msgs::msg::TwistStamped::ConstSharedPtr msg)
 {
+  const auto & t = msg->twist;
+  if (!std::isfinite(t.linear.x) || !std::isfinite(t.linear.y) || !std::isfinite(t.linear.z) ||
+      !std::isfinite(t.angular.x) || !std::isfinite(t.angular.y) || !std::isfinite(t.angular.z)) {
+    RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 1000,
+      "motion compensation: non-finite velocity in twist, ignoring");
+    return;
+  }
   std::lock_guard<std::mutex> lock(velocity_mutex_);
-  cached_velocity_.vx = msg->twist.linear.x;
-  cached_velocity_.vy = msg->twist.linear.y;
-  cached_velocity_.vz = msg->twist.linear.z;
-  cached_velocity_.wx = msg->twist.angular.x;
-  cached_velocity_.wy = msg->twist.angular.y;
-  cached_velocity_.wz = msg->twist.angular.z;
+  cached_velocity_.vx = t.linear.x;
+  cached_velocity_.vy = t.linear.y;
+  cached_velocity_.vz = t.linear.z;
+  cached_velocity_.wx = t.angular.x;
+  cached_velocity_.wy = t.angular.y;
+  cached_velocity_.wz = t.angular.z;
   cached_velocity_.stamp = rclcpp::Time(msg->header.stamp);
   cached_velocity_.valid = true;
 }
 
-Eigen::Isometry3d PolkaNode::compute_velocity_delta(double dt) const
+Eigen::Isometry3d PolkaNode::compute_velocity_delta(
+  const CachedVelocity & vel, double dt) const
 {
   Eigen::Isometry3d delta = Eigen::Isometry3d::Identity();
 
-  delta.translation() = Eigen::Vector3d(
-    cached_velocity_.vx * dt,
-    cached_velocity_.vy * dt,
-    cached_velocity_.vz * dt);
+  delta.translation() = Eigen::Vector3d(vel.vx * dt, vel.vy * dt, vel.vz * dt);
 
-  Eigen::Vector3d omega(cached_velocity_.wx, cached_velocity_.wy, cached_velocity_.wz);
+  Eigen::Vector3d omega(vel.wx, vel.wy, vel.wz);
   double angle = omega.norm() * std::abs(dt);
   if (angle > 1e-9) {
     Eigen::Vector3d axis = omega.normalized();
@@ -332,6 +392,41 @@ Eigen::Isometry3d PolkaNode::compute_velocity_delta(double dt) const
   }
 
   return delta;
+}
+
+PipelineConfig PolkaNode::build_pipeline_config() const
+{
+  PipelineConfig pcfg;
+  pcfg.output_filters = config_.cloud_output.filters;
+  pcfg.self_filter_enabled = config_.cloud_output.self_filter.enabled;
+  pcfg.self_filter_boxes = config_.cloud_output.self_filter.boxes;
+  pcfg.height_cap = config_.cloud_output.height_cap;
+  pcfg.voxel = config_.cloud_output.voxel;
+  pcfg.scan_enabled = (scan_pub_ != nullptr);
+  if (pcfg.scan_enabled)
+    pcfg.flatten = config_.scan_output.flatten;
+  return pcfg;
+}
+
+void PolkaNode::publish_scan_from_ranges(
+  const std::vector<float> & ranges, const rclcpp::Time & stamp)
+{
+  const auto & fp = config_.scan_output.flatten;
+
+  sensor_msgs::msg::LaserScan scan;
+  scan.header.frame_id = config_.output_frame_id;
+  scan.header.stamp = stamp;
+  scan.angle_min = static_cast<float>(fp.angle_min);
+  scan.angle_max = static_cast<float>(fp.angle_max);
+  scan.angle_increment = static_cast<float>(fp.angle_increment);
+  scan.range_min = static_cast<float>(fp.range_min);
+  scan.range_max = static_cast<float>(fp.range_max);
+  scan.time_increment = 0.0f;
+  scan.scan_time = (config_.output_rate > 0.0)
+    ? 1.0f / static_cast<float>(config_.output_rate) : 0.0f;
+  scan.ranges = ranges;
+
+  scan_pub_->publish(scan);
 }
 
 void PolkaNode::voxel_downsample(CloudT & cloud)
@@ -361,7 +456,7 @@ void PolkaNode::height_cap(CloudT & cloud)
   cloud.is_dense = true;
 }
 
-void PolkaNode::reconfigure()
+bool PolkaNode::reconfigure()
 {
   auto prev_rate = config_.output_rate;
   auto prev_cloud_enabled = config_.cloud_output.enabled;
@@ -371,7 +466,7 @@ void PolkaNode::reconfigure()
     config_ = config_loader_.reload(source_names_);
   } catch (const std::exception & ex) {
     RCLCPP_ERROR(get_logger(), "reconfigure failed: %s", ex.what());
-    return;
+    return false;
   }
 
   // Rebuild output timer if rate changed
@@ -416,6 +511,7 @@ void PolkaNode::reconfigure()
     sources_[i]->rebuild_filters(config_.sources[i].filter_params);
 
   RCLCPP_INFO(get_logger(), "reconfigured");
+  return true;
 }
 
 }  // namespace polka

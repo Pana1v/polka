@@ -20,21 +20,19 @@
 #define POLKA_VOXEL_TABLE_SIZE (1 << 18)
 #define POLKA_MAX_SCAN_BINS 4096
 
-// Per-source filter params (used during merge)
 struct GpuFilterParams {
   float min_range_sq;
   float max_range_sq;
   bool angular_enabled;
   bool invert;
   int n_angular_ranges;
-  float4 angular_bounds[POLKA_MAX_ANGULAR_RANGES];  // (cos_lo, sin_lo, cos_hi, sin_hi)
-  bool angular_wide[POLKA_MAX_ANGULAR_RANGES];       // true if span > 180°
+  float4 angular_bounds[POLKA_MAX_ANGULAR_RANGES];
+  bool angular_wide[POLKA_MAX_ANGULAR_RANGES];
   bool box_enabled;
   float3 box_min;
   float3 box_max;
 };
 
-// Post-merge output filter params (fused: range + angular + box + self-filter + height cap)
 struct GpuOutputFilterParams {
   bool range_enabled;
   float min_range_sq;
@@ -43,8 +41,8 @@ struct GpuOutputFilterParams {
   bool angular_enabled;
   bool angular_invert;
   int n_angular_ranges;
-  float4 angular_bounds[POLKA_MAX_ANGULAR_RANGES];  // (cos_lo, sin_lo, cos_hi, sin_hi)
-  bool angular_wide[POLKA_MAX_ANGULAR_RANGES];       // true if span > 180°
+  float4 angular_bounds[POLKA_MAX_ANGULAR_RANGES];
+  bool angular_wide[POLKA_MAX_ANGULAR_RANGES];
 
   bool box_enabled;
   float3 box_min;
@@ -59,7 +57,6 @@ struct GpuOutputFilterParams {
   float z_max;
 };
 
-// LaserScan flatten params
 struct GpuFlattenParams {
   float z_min;
   float z_max;

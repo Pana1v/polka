@@ -158,13 +158,10 @@ void PolkaNode::output_callback()
     source_data.push_back({cloud, transform, src->filter_params(), src->last_stamp()});
   }
 
-  // --- Guaranteed output frequency even with slow sources ---
-  // If no fresh data, republish last good cloud at specified rate
   bool has_fresh_data = !source_data.empty();
   if (!has_fresh_data) {
     std::lock_guard<std::mutex> lock(last_data_mutex_);
     if (last_cloud_ && !last_cloud_->empty()) {
-      // Republish last cloud with updated timestamp
       rclcpp::Time stale_stamp = now;
       if (cloud_pub_) {
         sensor_msgs::msg::PointCloud2 msg;
@@ -181,11 +178,10 @@ void PolkaNode::output_callback()
       }
       return;
     } else {
-      return;  // No buffered data yet
+      return;
     }
   }
 
-  // Timestamp spread warning
   std::vector<rclcpp::Time> stamps;
   stamps.reserve(source_data.size());
   for (const auto & sd : source_data)
@@ -246,14 +242,12 @@ void PolkaNode::output_callback()
   }
 
   if (merge_engine_->is_gpu()) {
-    // GPU path: full pipeline on device
     auto pcfg = build_pipeline_config();
     auto result = merge_engine_->merge_pipeline(inputs, pcfg);
     if (!result.cloud || result.cloud->empty()) return;
 
     if (cloud_pub_) {
       publish_cloud(result.cloud, output_stamp);
-      // Buffer for guaranteed frequency publishing
       std::lock_guard<std::mutex> lock(last_data_mutex_);
       last_cloud_ = result.cloud;
       last_cloud_stamp_ = output_stamp;
@@ -266,7 +260,6 @@ void PolkaNode::output_callback()
       publish_scan(result.cloud, output_stamp);
     }
   } else {
-    // CPU path: merge then post-process on CPU
     auto merged = merge_engine_->merge(inputs);
     if (!merged || merged->empty()) return;
 
@@ -281,7 +274,6 @@ void PolkaNode::output_callback()
 
     if (cloud_pub_) {
       publish_cloud(merged, output_stamp);
-      // Buffer for guaranteed frequency publishing
       std::lock_guard<std::mutex> lock(last_data_mutex_);
       last_cloud_ = merged;
       last_cloud_stamp_ = output_stamp;

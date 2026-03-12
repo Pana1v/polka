@@ -27,7 +27,8 @@ struct GpuFilterParams {
   bool angular_enabled;
   bool invert;
   int n_angular_ranges;
-  float2 angular_ranges[POLKA_MAX_ANGULAR_RANGES];
+  float4 angular_bounds[POLKA_MAX_ANGULAR_RANGES];  // (cos_lo, sin_lo, cos_hi, sin_hi)
+  bool angular_wide[POLKA_MAX_ANGULAR_RANGES];       // true if span > 180°
   bool box_enabled;
   float3 box_min;
   float3 box_max;
@@ -42,7 +43,8 @@ struct GpuOutputFilterParams {
   bool angular_enabled;
   bool angular_invert;
   int n_angular_ranges;
-  float2 angular_ranges[POLKA_MAX_ANGULAR_RANGES];
+  float4 angular_bounds[POLKA_MAX_ANGULAR_RANGES];  // (cos_lo, sin_lo, cos_hi, sin_hi)
+  bool angular_wide[POLKA_MAX_ANGULAR_RANGES];       // true if span > 180°
 
   bool box_enabled;
   float3 box_min;

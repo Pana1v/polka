@@ -158,7 +158,32 @@ void PolkaNode::output_callback()
     source_data.push_back({cloud, transform, src->filter_params(), src->last_stamp()});
   }
 
-  if (source_data.empty()) return;
+  // --- Guaranteed output frequency even with slow sources ---
+  // If no fresh data, republish last good cloud at specified rate
+  bool has_fresh_data = !source_data.empty();
+  if (!has_fresh_data) {
+    std::lock_guard<std::mutex> lock(last_data_mutex_);
+    if (last_cloud_ && !last_cloud_->empty()) {
+      // Republish last cloud with updated timestamp
+      rclcpp::Time stale_stamp = now;
+      if (cloud_pub_) {
+        sensor_msgs::msg::PointCloud2 msg;
+        pcl::toROSMsg(*last_cloud_, msg);
+        msg.header.frame_id = config_.output_frame_id;
+        msg.header.stamp = stale_stamp;
+        cloud_pub_->publish(msg);
+      }
+      if (scan_pub_) {
+        if (!last_scan_ranges_.empty())
+          publish_scan_from_ranges(last_scan_ranges_, stale_stamp);
+        else
+          publish_scan(last_cloud_, stale_stamp);
+      }
+      return;
+    } else {
+      return;  // No buffered data yet
+    }
+  }
 
   // Timestamp spread warning
   std::vector<rclcpp::Time> stamps;
@@ -221,16 +246,25 @@ void PolkaNode::output_callback()
   }
 
   if (merge_engine_->is_gpu()) {
-    // Full GPU pipeline: merge + filters + voxel + flatten all on device
+    // GPU path: full pipeline on device
     auto pcfg = build_pipeline_config();
     auto result = merge_engine_->merge_pipeline(inputs, pcfg);
     if (!result.cloud || result.cloud->empty()) return;
 
-    if (cloud_pub_) publish_cloud(result.cloud, output_stamp);
-    if (scan_pub_ && !result.scan_ranges.empty())
+    if (cloud_pub_) {
+      publish_cloud(result.cloud, output_stamp);
+      // Buffer for guaranteed frequency publishing
+      std::lock_guard<std::mutex> lock(last_data_mutex_);
+      last_cloud_ = result.cloud;
+      last_cloud_stamp_ = output_stamp;
+    }
+    if (scan_pub_ && !result.scan_ranges.empty()) {
       publish_scan_from_ranges(result.scan_ranges, output_stamp);
-    else if (scan_pub_)
+      std::lock_guard<std::mutex> lock(last_data_mutex_);
+      last_scan_ranges_ = result.scan_ranges;
+    } else if (scan_pub_) {
       publish_scan(result.cloud, output_stamp);
+    }
   } else {
     // CPU path: merge then post-process on CPU
     auto merged = merge_engine_->merge(inputs);
@@ -245,8 +279,16 @@ void PolkaNode::output_callback()
     if (config_.cloud_output.voxel.enabled)
       voxel_downsample(*merged);
 
-    if (cloud_pub_) publish_cloud(merged, output_stamp);
-    if (scan_pub_) publish_scan(merged, output_stamp);
+    if (cloud_pub_) {
+      publish_cloud(merged, output_stamp);
+      // Buffer for guaranteed frequency publishing
+      std::lock_guard<std::mutex> lock(last_data_mutex_);
+      last_cloud_ = merged;
+      last_cloud_stamp_ = output_stamp;
+    }
+    if (scan_pub_) {
+      publish_scan(merged, output_stamp);
+    }
   }
 }
 

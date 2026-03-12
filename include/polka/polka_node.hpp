@@ -95,6 +95,12 @@ private:
 
   CachedVelocity cached_velocity_;
   mutable std::mutex velocity_mutex_;
+
+  // Stale data buffering - ensures publishing at specified frequency
+  CloudT::Ptr last_cloud_;
+  std::vector<float> last_scan_ranges_;
+  rclcpp::Time last_cloud_stamp_;
+  mutable std::mutex last_data_mutex_;
 };
 
 }  // namespace polka

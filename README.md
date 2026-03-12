@@ -1,4 +1,4 @@
-# Polka
+# POLKA
 
 <p align="center">
   <img src="images/polka.png" alt="Polka" width="300"/>

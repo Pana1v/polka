@@ -1,3 +1,17 @@
+// Copyright 2025 Panav Arpit Raaj <praajarpit@gmail.com>
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 #include "polka/source_adapter.hpp"
 #include "polka/filters/range_filter.hpp"
 #include "polka/filters/angular_filter.hpp"
@@ -59,7 +73,7 @@ bool SourceAdapter::validate_fields(const sensor_msgs::msg::PointCloud2 & msg)
   }
   if (!has_x || !has_y || !has_z) {
     RCLCPP_ERROR(logger_,
-      "polka: source '%s' missing required FLOAT32 x/y/z fields — dropping all messages",
+      "polka: source '%s' missing required FLOAT32 x/y/z fields - dropping all messages",
       config_.name.c_str());
     return false;
   }

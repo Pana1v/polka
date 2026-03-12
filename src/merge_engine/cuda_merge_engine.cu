@@ -257,7 +257,7 @@ __global__ void scan_decode_kernel(
 
   int val = scan_ranges_int[idx];
   int sentinel = __float_as_int(r_max);
-  scan_ranges_float[idx] = (val == sentinel) ? CUDART_INF_F : __int_as_float(val);
+  scan_ranges_float[idx] = (val == sentinel) ? __int_as_float(0x7F800000) : __int_as_float(val);
 }
 
 struct CudaMergeEngine::Impl {

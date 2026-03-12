@@ -32,7 +32,7 @@ namespace polka {
 
 class SourceAdapter {
 public:
-  SourceAdapter(rclcpp::Node * node, const SourceConfig & config);
+  SourceAdapter(rclcpp::Node * node, const SourceConfig & config, bool gpu_filters = false);
 
   CloudT::ConstPtr get_latest() const;
   bool is_stale(double timeout_sec, const rclcpp::Time & now) const;
@@ -69,6 +69,7 @@ private:
   bool fields_valid_{false};
 
   std::vector<std::unique_ptr<IFilter>> filters_;
+  bool gpu_filters_{false};
 };
 
 }  // namespace polka

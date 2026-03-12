@@ -65,8 +65,9 @@ PolkaNode::PolkaNode(const rclcpp::NodeOptions & options)
   if (config_.motion_compensation.enabled)
     setup_velocity_subscriber();
 
+  bool gpu_filters = merge_engine_->is_gpu();
   for (const auto & src_cfg : config_.sources)
-    sources_.push_back(std::make_unique<SourceAdapter>(this, src_cfg));
+    sources_.push_back(std::make_unique<SourceAdapter>(this, src_cfg, gpu_filters));
 
   last_good_transforms_.resize(sources_.size(), Eigen::Isometry3d::Identity());
   tf_fail_counts_.resize(sources_.size(), 0);

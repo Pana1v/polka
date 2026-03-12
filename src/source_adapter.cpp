@@ -22,8 +22,8 @@
 
 namespace polka {
 
-SourceAdapter::SourceAdapter(rclcpp::Node * node, const SourceConfig & config)
-: node_(node), config_(config), logger_(node->get_logger())
+SourceAdapter::SourceAdapter(rclcpp::Node * node, const SourceConfig & config, bool gpu_filters)
+: node_(node), config_(config), logger_(node->get_logger()), gpu_filters_(gpu_filters)
 {
   // Build QoS
   rclcpp::QoS qos(config.qos_history_depth);
@@ -44,17 +44,15 @@ SourceAdapter::SourceAdapter(rclcpp::Node * node, const SourceConfig & config)
       std::bind(&SourceAdapter::scan_callback, this, std::placeholders::_1));
   }
 
-  // Build per-source filter pipeline
-  const auto & fp = config.filter_params;
-  if (fp.range_filter_enabled) {
-    filters_.push_back(std::make_unique<RangeFilter>(fp.min_range, fp.max_range));
-  }
-  if (fp.angular_filter_enabled && !fp.angular_ranges.empty()) {
-    filters_.push_back(
-      std::make_unique<AngularFilter>(fp.angular_ranges, fp.angular_invert));
-  }
-  if (fp.box_filter_enabled) {
-    filters_.push_back(std::make_unique<BoxFilter>(fp.box_min, fp.box_max));
+  if (!gpu_filters_) {
+    const auto & fp = config.filter_params;
+    if (fp.range_filter_enabled)
+      filters_.push_back(std::make_unique<RangeFilter>(fp.min_range, fp.max_range));
+    if (fp.angular_filter_enabled && !fp.angular_ranges.empty())
+      filters_.push_back(
+        std::make_unique<AngularFilter>(fp.angular_ranges, fp.angular_invert));
+    if (fp.box_filter_enabled)
+      filters_.push_back(std::make_unique<BoxFilter>(fp.box_min, fp.box_max));
   }
 
   RCLCPP_INFO(logger_, "polka: source '%s' subscribed to '%s' (%s), %zu filters",
@@ -149,6 +147,7 @@ void SourceAdapter::rebuild_filters(const FilterParams & fp)
 {
   config_.filter_params = fp;
   filters_.clear();
+  if (gpu_filters_) return;
   if (fp.range_filter_enabled)
     filters_.push_back(std::make_unique<RangeFilter>(fp.min_range, fp.max_range));
   if (fp.angular_filter_enabled && !fp.angular_ranges.empty())

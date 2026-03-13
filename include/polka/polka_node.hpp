@@ -24,12 +24,12 @@
 #include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/msg/point_cloud2.hpp>
 #include <sensor_msgs/msg/laser_scan.hpp>
-#include <nav_msgs/msg/odometry.hpp>
-#include <geometry_msgs/msg/twist_stamped.hpp>
+#include <sensor_msgs/msg/imu.hpp>
 #include <tf2_ros/buffer.h>
 #include <tf2_ros/transform_listener.h>
 #include <Eigen/Geometry>
 
+#include <deque>
 #include <memory>
 #include <vector>
 #include <string>
@@ -37,18 +37,23 @@
 
 namespace polka {
 
+struct ImuSample {
+  double wx = 0.0, wy = 0.0, wz = 0.0;   // angular velocity (rad/s)
+  double ax = 0.0, ay = 0.0, az = 0.0;    // linear acceleration (m/s²)
+  rclcpp::Time stamp{0, 0, RCL_ROS_TIME};
+};
+
+struct AveragedImu {
+  Eigen::Vector3d angular_vel = Eigen::Vector3d::Zero();
+  Eigen::Vector3d linear_accel = Eigen::Vector3d::Zero();
+  bool valid = false;
+};
+
 class PolkaNode : public rclcpp::Node {
 public:
   explicit PolkaNode(const rclcpp::NodeOptions & options);
 
 private:
-  struct CachedVelocity {
-    double vx = 0.0, vy = 0.0, vz = 0.0;
-    double wx = 0.0, wy = 0.0, wz = 0.0;
-    rclcpp::Time stamp{0, 0, RCL_ROS_TIME};
-    bool valid = false;
-  };
-
   void output_callback();
   void publish_cloud(CloudT::ConstPtr cloud, const rclcpp::Time & stamp);
   void publish_scan(CloudT::ConstPtr cloud, const rclcpp::Time & stamp);
@@ -60,11 +65,10 @@ private:
   void voxel_downsample(CloudT & cloud);
   void height_cap(CloudT & cloud);
 
-  // Motion compensation
-  void setup_velocity_subscriber();
-  void odom_callback(nav_msgs::msg::Odometry::ConstSharedPtr msg);
-  void twist_callback(geometry_msgs::msg::TwistStamped::ConstSharedPtr msg);
-  Eigen::Isometry3d compute_velocity_delta(const CachedVelocity & vel, double dt) const;
+  // IMU-based motion compensation
+  void setup_imu_subscriber();
+  void imu_callback(sensor_msgs::msg::Imu::ConstSharedPtr msg);
+  AveragedImu average_imu(const rclcpp::Time & start, const rclcpp::Time & end) const;
 
   MergeConfig config_;
 
@@ -89,12 +93,11 @@ private:
   std::vector<std::string> source_names_;
   rclcpp::node_interfaces::OnSetParametersCallbackHandle::SharedPtr param_cb_;
 
-  // Velocity-based motion compensation
-  rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub_;
-  rclcpp::Subscription<geometry_msgs::msg::TwistStamped>::SharedPtr twist_sub_;
-
-  CachedVelocity cached_velocity_;
-  mutable std::mutex velocity_mutex_;
+  // IMU ring buffer and subscription
+  rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr imu_sub_;
+  std::deque<ImuSample> imu_buffer_;
+  mutable std::mutex imu_mutex_;
+  std::shared_ptr<const AveragedImu> imu_snapshot_;  // atomic-shared with SourceAdapters
 
   // Stale data buffering - ensures publishing at specified frequency
   CloudT::Ptr last_cloud_;

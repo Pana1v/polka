@@ -23,6 +23,8 @@
 #include <sensor_msgs/msg/laser_scan.hpp>
 #include <laser_geometry/laser_geometry.hpp>
 
+#include <Eigen/Core>
+#include <functional>
 #include <memory>
 #include <string>
 #include <vector>
@@ -30,9 +32,15 @@
 
 namespace polka {
 
+struct AveragedImu;  // forward declaration
+
 class SourceAdapter {
 public:
-  SourceAdapter(rclcpp::Node * node, const SourceConfig & config, bool gpu_filters = false);
+  using ImuGetter = std::function<std::shared_ptr<const AveragedImu>()>;
+
+  SourceAdapter(rclcpp::Node * node, const SourceConfig & config, bool gpu_filters = false,
+                ImuGetter imu_getter = nullptr, bool deskew_enabled = false,
+                const std::string & timestamp_field_hint = "auto");
 
   CloudT::ConstPtr get_latest() const;
   bool is_stale(double timeout_sec, const rclcpp::Time & now) const;
@@ -49,6 +57,12 @@ private:
   bool validate_fields(const sensor_msgs::msg::PointCloud2 & msg);
   void apply_filters(CloudT & cloud);
   void store_cloud(CloudT::Ptr cloud, const std_msgs::msg::Header & header);
+
+  // Per-point deskewing
+  void detect_timestamp_field(const sensor_msgs::msg::PointCloud2 & msg);
+  double extract_point_time(const uint8_t * point_data) const;
+  void deskew_cloud(CloudT & cloud, const sensor_msgs::msg::PointCloud2 & raw_msg,
+                    const AveragedImu & imu);
 
   rclcpp::Node * node_;
   SourceConfig config_;
@@ -70,6 +84,15 @@ private:
 
   std::vector<std::unique_ptr<IFilter>> filters_;
   bool gpu_filters_{false};
+
+  // Deskewing state
+  ImuGetter get_imu_;
+  bool deskew_enabled_{false};
+  std::string timestamp_field_hint_{"auto"};
+  bool timestamp_field_detected_{false};
+  bool has_timestamp_field_{false};
+  uint32_t timestamp_field_offset_{0};
+  uint8_t timestamp_field_datatype_{0};  // FLOAT32 or FLOAT64
 };
 
 }  // namespace polka

@@ -149,9 +149,11 @@ struct ScanOutputConfig {
 
 struct MotionCompensationConfig {
   bool enabled = false;
-  std::string velocity_topic = "~/odom";
-  std::string velocity_type = "odometry";  // "odometry" or "twist_stamped"
-  double max_velocity_age = 0.2;
+  std::string imu_topic = "";                    // sensor_msgs/Imu topic
+  double max_imu_age = 0.2;                      // reject stale IMU data (seconds)
+  int imu_buffer_size = 200;                      // ring buffer capacity
+  bool per_point_deskew = true;                   // per-point correction if timestamps available
+  std::string deskew_timestamp_field = "auto";    // "auto" or specific field name
 };
 
 struct MergeConfig {

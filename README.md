@@ -17,7 +17,7 @@ Managing multiple LiDAR sensors in ROS 2 typically requires a chain of separate 
 - **Unified output**: emit merged PointCloud2, LaserScan, or both simultaneously from a single node
 - **Rich output filtering**: after merge, apply range, angular, box, height filter, footprint filter (ego-body exclusion), and voxel downsampling in a defined, consistent order
 - **CUDA GPU acceleration**: the merge engine can run entirely on GPU with fused kernels and pre-allocated buffers, cutting merge latency significantly on sensor-dense platforms
-- **Motion compensation**: first-order velocity correction aligns scans from sensors with different timestamps, eliminating ghosting artifacts during robot motion
+- **IMU-based deskewing**: per-point motion correction using the SE(3) exponential map removes intra-scan distortion, plus inter-source alignment eliminates ghosting artifacts during robot motion
 - **TF2 integration**: transforms are resolved automatically, with fallback to the last known good transform so a momentary TF dropout does not drop the entire output
 
 ## Features
@@ -26,7 +26,7 @@ Managing multiple LiDAR sensors in ROS 2 typically requires a chain of separate 
 - **Dual output**: publish merged PointCloud2, LaserScan, or both simultaneously
 - **Per-source filtering**: range, angular, and box filters applied before merge
 - **Output filtering**: range, angular, box, height filter, footprint filter (ego-body exclusion), voxel downsampling
-- **Motion compensation**: velocity-based correction for inter-scan time differences (Odometry or TwistStamped)
+- **IMU-based deskewing**: per-point SE(3) motion correction using IMU angular velocity and acceleration, with auto-detection of per-point timestamp fields
 - **CUDA acceleration**: optional GPU merge engine with fused kernels and pre-allocated buffers
 - **TF2 integration**: automatic transform lookup with fallback to last known good transform
 - **Fully parameterized**: every feature is runtime-configurable via ROS 2 parameters
@@ -38,7 +38,7 @@ Managing multiple LiDAR sensors in ROS 2 typically requires a chain of separate 
 |---|---|
 | `rclcpp` / `rclcpp_components` | ROS 2 node framework |
 | `sensor_msgs` | PointCloud2, LaserScan messages |
-| `nav_msgs` / `geometry_msgs` | Odometry, TwistStamped for motion compensation |
+| `sensor_msgs` (Imu) | IMU data for motion compensation / deskewing |
 | `tf2_ros` / `tf2_eigen` | Frame transforms |
 | `pcl_conversions` | PCL <-> ROS message conversion |
 | `laser_geometry` | LaserScan -> PointCloud2 projection |
@@ -86,16 +86,20 @@ All parameters live under the `polka` namespace. See [config/example_params.yaml
 | `source_timeout` | `0.5` | Drop source if no data within this window (s) |
 | `timestamp_strategy` | `"earliest"` | Output stamp: `earliest`, `latest`, `average`, or `local` |
 
-### Motion Compensation
+### Motion Compensation (IMU Deskewing)
 
-Corrects for robot motion between source scan timestamps using first-order velocity approximation.
+Corrects for robot motion during LiDAR scans using IMU data. Per-point deskewing uses the SE(3) exponential map motion model with angular velocity and linear acceleration from IMU, applied to each point based on its per-point timestamp. Inter-source alignment corrects for timing offsets between different sensors.
+
+The motion model is inspired by [rko_lio](https://github.com/TixiaoShan/rko_lio) (Malladi et al., 2025).
 
 ```yaml
 motion_compensation:
   enabled: true
-  velocity_topic: "~/odom"
-  velocity_type: "odometry"    # or "twist_stamped"
-  max_velocity_age: 0.2
+  imu_topic: "/imu/data"          # sensor_msgs/Imu topic
+  max_imu_age: 0.2                # seconds - reject stale IMU
+  imu_buffer_size: 200            # ring buffer (~1s at 200Hz)
+  per_point_deskew: true          # per-point correction within each scan
+  deskew_timestamp_field: "auto"  # auto-detects 'time', 't', 'timestamp', etc.
 ```
 
 ### Output Filters
@@ -258,6 +262,21 @@ polka/
     ├── source_adapter.cpp          # Source subscription logic
     ├── filters/                    # Filter implementations
     └── merge_engine/               # Merge engine implementations
+```
+
+## Acknowledgments
+
+The per-point deskewing motion model (SE(3) exponential map with constant-acceleration + constant-angular-velocity) is inspired by rko_lio:
+
+```bibtex
+@article{malladi2025arxiv,
+  author  = {M.V.R. Malladi and T. Guadagnino and L. Lobefaro and C. Stachniss},
+  title   = {A Robust Approach for LiDAR-Inertial Odometry Without Sensor-Specific Modeling},
+  journal = {arXiv preprint},
+  year    = {2025},
+  volume  = {arXiv:2509.06593},
+  url     = {https://arxiv.org/pdf/2509.06593},
+}
 ```
 
 ## License

@@ -12,14 +12,12 @@ find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(rclcpp_components REQUIRED)
 find_package(sensor_msgs REQUIRED)
-find_package(geometry_msgs REQUIRED)
 find_package(tf2_ros REQUIRED)
 find_package(tf2_geometry_msgs REQUIRED)
 find_package(tf2_eigen REQUIRED)
 find_package(pcl_conversions REQUIRED)
 find_package(laser_geometry REQUIRED)
 find_package(PCL REQUIRED COMPONENTS common filters)
-find_package(nav_msgs REQUIRED)
 find_package(Eigen3 REQUIRED)
 
 option(WITH_CUDA "Enable CUDA acceleration" ON)
@@ -58,7 +56,7 @@ target_include_directories(polka_core PUBLIC
   "$<INSTALL_INTERFACE:include/${PROJECT_NAME}>"
 )
 ament_target_dependencies(polka_core
-  rclcpp rclcpp_components sensor_msgs geometry_msgs nav_msgs
+  rclcpp rclcpp_components sensor_msgs
   tf2_ros tf2_geometry_msgs tf2_eigen pcl_conversions laser_geometry
 )
 target_link_libraries(polka_core ${PCL_LIBRARIES})

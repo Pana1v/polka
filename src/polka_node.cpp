@@ -17,6 +17,7 @@
 #include "polka/filters/range_filter.hpp"
 #include "polka/filters/angular_filter.hpp"
 #include "polka/filters/box_filter.hpp"
+#include "polka/se3_exp.hpp"
 
 #ifdef POLKA_CUDA_ENABLED
 #include "polka/merge_engine/cuda_merge_engine.hpp"
@@ -63,11 +64,22 @@ PolkaNode::PolkaNode(const rclcpp::NodeOptions & options)
     merge_engine_->is_gpu() ? "" : " (set enable_gpu:=true for GPU acceleration)");
 
   if (config_.motion_compensation.enabled)
-    setup_velocity_subscriber();
+    setup_imu_subscriber();
+
+  // IMU getter for source adapters (per-point deskewing)
+  SourceAdapter::ImuGetter imu_getter = nullptr;
+  if (config_.motion_compensation.enabled && config_.motion_compensation.per_point_deskew) {
+    imu_getter = [this]() -> std::shared_ptr<const AveragedImu> {
+      return std::atomic_load(&imu_snapshot_);
+    };
+  }
 
   bool gpu_filters = merge_engine_->is_gpu();
   for (const auto & src_cfg : config_.sources)
-    sources_.push_back(std::make_unique<SourceAdapter>(this, src_cfg, gpu_filters));
+    sources_.push_back(std::make_unique<SourceAdapter>(
+      this, src_cfg, gpu_filters, imu_getter,
+      config_.motion_compensation.enabled && config_.motion_compensation.per_point_deskew,
+      config_.motion_compensation.deskew_timestamp_field));
 
   last_good_transforms_.resize(sources_.size(), Eigen::Isometry3d::Identity());
   tf_fail_counts_.resize(sources_.size(), 0);
@@ -198,33 +210,14 @@ void PolkaNode::output_callback()
 
   auto output_stamp = compute_output_stamp(stamps);
 
-  // Pass 2: Apply velocity compensation and build MergeInputs
+  // Pass 2: Apply IMU-based inter-source compensation and build MergeInputs
   bool do_compensate = false;
-  CachedVelocity velocity_snapshot;
+  AveragedImu imu_for_alignment;
   if (config_.motion_compensation.enabled) {
-    std::lock_guard<std::mutex> lock(velocity_mutex_);
-    if (cached_velocity_.valid) {
-      double vel_age = (now - cached_velocity_.stamp).seconds();
-      if (vel_age <= config_.motion_compensation.max_velocity_age) {
-        constexpr double kMaxLinearVel = 50.0;   // m/s
-        constexpr double kMaxAngularVel = 10.0;  // rad/s
-        if (std::abs(cached_velocity_.vx) > kMaxLinearVel ||
-            std::abs(cached_velocity_.vy) > kMaxLinearVel ||
-            std::abs(cached_velocity_.vz) > kMaxLinearVel ||
-            std::abs(cached_velocity_.wx) > kMaxAngularVel ||
-            std::abs(cached_velocity_.wy) > kMaxAngularVel ||
-            std::abs(cached_velocity_.wz) > kMaxAngularVel) {
-          RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 2000,
-            "velocity exceeds sanity bounds (lin>%.0f m/s or ang>%.0f rad/s), "
-            "skipping compensation", kMaxLinearVel, kMaxAngularVel);
-        } else {
-          velocity_snapshot = cached_velocity_;
-          do_compensate = true;
-        }
-      } else {
-        RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 5000,
-          "velocity data stale (%.3f s), skipping compensation", vel_age);
-      }
+    auto imu = std::atomic_load(&imu_snapshot_);
+    if (imu && imu->valid) {
+      imu_for_alignment = *imu;
+      do_compensate = true;
     }
   }
 
@@ -235,7 +228,8 @@ void PolkaNode::output_callback()
     if (do_compensate) {
       double dt = (sd.stamp - output_stamp).seconds();
       if (std::abs(dt) > 1e-6) {
-        Eigen::Isometry3d delta = compute_velocity_delta(velocity_snapshot, dt);
+        Eigen::Isometry3d delta = compute_motion_delta(
+          imu_for_alignment.angular_vel, imu_for_alignment.linear_accel, dt);
         final_transform = delta * sd.transform;
       }
     }
@@ -350,83 +344,91 @@ void PolkaNode::publish_scan(CloudT::ConstPtr cloud, const rclcpp::Time & stamp)
   scan_pub_->publish(scan);
 }
 
-void PolkaNode::setup_velocity_subscriber()
+void PolkaNode::setup_imu_subscriber()
 {
   const auto & mc = config_.motion_compensation;
-  if (mc.velocity_type == "odometry") {
-    odom_sub_ = create_subscription<nav_msgs::msg::Odometry>(
-      mc.velocity_topic, rclcpp::SensorDataQoS(),
-      std::bind(&PolkaNode::odom_callback, this, std::placeholders::_1));
-    RCLCPP_INFO(get_logger(), "motion compensation: subscribing to Odometry on '%s'",
-      mc.velocity_topic.c_str());
-  } else if (mc.velocity_type == "twist_stamped") {
-    twist_sub_ = create_subscription<geometry_msgs::msg::TwistStamped>(
-      mc.velocity_topic, rclcpp::SensorDataQoS(),
-      std::bind(&PolkaNode::twist_callback, this, std::placeholders::_1));
-    RCLCPP_INFO(get_logger(), "motion compensation: subscribing to TwistStamped on '%s'",
-      mc.velocity_topic.c_str());
-  } else {
-    RCLCPP_ERROR(get_logger(),
-      "motion compensation: unknown velocity_type '%s', disabling",
-      mc.velocity_type.c_str());
-  }
-}
-
-void PolkaNode::odom_callback(nav_msgs::msg::Odometry::ConstSharedPtr msg)
-{
-  const auto & t = msg->twist.twist;
-  if (!std::isfinite(t.linear.x) || !std::isfinite(t.linear.y) || !std::isfinite(t.linear.z) ||
-      !std::isfinite(t.angular.x) || !std::isfinite(t.angular.y) || !std::isfinite(t.angular.z)) {
-    RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 1000,
-      "motion compensation: non-finite velocity in odometry, ignoring");
+  if (mc.imu_topic.empty()) {
+    RCLCPP_WARN(get_logger(),
+      "motion compensation enabled but imu_topic is empty, deskewing will not activate");
     return;
   }
-  std::lock_guard<std::mutex> lock(velocity_mutex_);
-  cached_velocity_.vx = t.linear.x;
-  cached_velocity_.vy = t.linear.y;
-  cached_velocity_.vz = t.linear.z;
-  cached_velocity_.wx = t.angular.x;
-  cached_velocity_.wy = t.angular.y;
-  cached_velocity_.wz = t.angular.z;
-  cached_velocity_.stamp = rclcpp::Time(msg->header.stamp);
-  cached_velocity_.valid = true;
+
+  imu_sub_ = create_subscription<sensor_msgs::msg::Imu>(
+    mc.imu_topic, rclcpp::SensorDataQoS(),
+    std::bind(&PolkaNode::imu_callback, this, std::placeholders::_1));
+  RCLCPP_INFO(get_logger(), "motion compensation: subscribing to IMU on '%s'",
+    mc.imu_topic.c_str());
 }
 
-void PolkaNode::twist_callback(geometry_msgs::msg::TwistStamped::ConstSharedPtr msg)
+void PolkaNode::imu_callback(sensor_msgs::msg::Imu::ConstSharedPtr msg)
 {
-  const auto & t = msg->twist;
-  if (!std::isfinite(t.linear.x) || !std::isfinite(t.linear.y) || !std::isfinite(t.linear.z) ||
-      !std::isfinite(t.angular.x) || !std::isfinite(t.angular.y) || !std::isfinite(t.angular.z)) {
+  const auto & a = msg->linear_acceleration;
+  const auto & w = msg->angular_velocity;
+  if (!std::isfinite(a.x) || !std::isfinite(a.y) || !std::isfinite(a.z) ||
+      !std::isfinite(w.x) || !std::isfinite(w.y) || !std::isfinite(w.z)) {
     RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 1000,
-      "motion compensation: non-finite velocity in twist, ignoring");
+      "motion compensation: non-finite values in IMU, ignoring");
     return;
   }
-  std::lock_guard<std::mutex> lock(velocity_mutex_);
-  cached_velocity_.vx = t.linear.x;
-  cached_velocity_.vy = t.linear.y;
-  cached_velocity_.vz = t.linear.z;
-  cached_velocity_.wx = t.angular.x;
-  cached_velocity_.wy = t.angular.y;
-  cached_velocity_.wz = t.angular.z;
-  cached_velocity_.stamp = rclcpp::Time(msg->header.stamp);
-  cached_velocity_.valid = true;
-}
 
-Eigen::Isometry3d PolkaNode::compute_velocity_delta(
-  const CachedVelocity & vel, double dt) const
-{
-  Eigen::Isometry3d delta = Eigen::Isometry3d::Identity();
+  ImuSample sample;
+  sample.wx = w.x;  sample.wy = w.y;  sample.wz = w.z;
+  sample.ax = a.x;  sample.ay = a.y;  sample.az = a.z;
+  sample.stamp = rclcpp::Time(msg->header.stamp);
 
-  delta.translation() = Eigen::Vector3d(vel.vx * dt, vel.vy * dt, vel.vz * dt);
-
-  Eigen::Vector3d omega(vel.wx, vel.wy, vel.wz);
-  double angle = omega.norm() * std::abs(dt);
-  if (angle > 1e-9) {
-    Eigen::Vector3d axis = omega.normalized();
-    delta.linear() = Eigen::AngleAxisd(omega.norm() * dt, axis).toRotationMatrix();
+  {
+    std::lock_guard<std::mutex> lock(imu_mutex_);
+    imu_buffer_.push_back(sample);
+    while (static_cast<int>(imu_buffer_.size()) > config_.motion_compensation.imu_buffer_size)
+      imu_buffer_.pop_front();
   }
 
-  return delta;
+  // Update the atomic snapshot with the latest single-sample average
+  // (SourceAdapters use this as a best-effort fallback when the full
+  //  average_imu() isn't called from the output_callback path)
+  auto avg = std::make_shared<AveragedImu>();
+  avg->angular_vel = Eigen::Vector3d(w.x, w.y, w.z);
+  avg->linear_accel = Eigen::Vector3d(a.x, a.y, a.z);
+  avg->valid = true;
+  std::atomic_store(&imu_snapshot_, std::const_pointer_cast<const AveragedImu>(avg));
+}
+
+AveragedImu PolkaNode::average_imu(
+  const rclcpp::Time & start, const rclcpp::Time & end) const
+{
+  AveragedImu result;
+  std::lock_guard<std::mutex> lock(imu_mutex_);
+
+  if (imu_buffer_.empty()) return result;
+
+  Eigen::Vector3d sum_w = Eigen::Vector3d::Zero();
+  Eigen::Vector3d sum_a = Eigen::Vector3d::Zero();
+  int count = 0;
+
+  for (const auto & s : imu_buffer_) {
+    if (s.stamp >= start && s.stamp <= end) {
+      sum_w += Eigen::Vector3d(s.wx, s.wy, s.wz);
+      sum_a += Eigen::Vector3d(s.ax, s.ay, s.az);
+      ++count;
+    }
+  }
+
+  if (count > 0) {
+    result.angular_vel = sum_w / count;
+    result.linear_accel = sum_a / count;
+    result.valid = true;
+  } else if (!imu_buffer_.empty()) {
+    // No samples in range — use the most recent sample
+    double age = (this->now() - imu_buffer_.back().stamp).seconds();
+    if (age <= config_.motion_compensation.max_imu_age) {
+      const auto & s = imu_buffer_.back();
+      result.angular_vel = Eigen::Vector3d(s.wx, s.wy, s.wz);
+      result.linear_accel = Eigen::Vector3d(s.ax, s.ay, s.az);
+      result.valid = true;
+    }
+  }
+
+  return result;
 }
 
 PipelineConfig PolkaNode::build_pipeline_config() const
@@ -526,14 +528,13 @@ bool PolkaNode::reconfigure()
   else if (!config_.scan_output.enabled && prev_scan_enabled)
     scan_pub_.reset();
 
-  // Toggle motion compensation subscriber
-  bool mc_was_enabled = (odom_sub_ != nullptr || twist_sub_ != nullptr);
-  bool mc_now_enabled = config_.motion_compensation.enabled;
-  if (mc_now_enabled && !mc_was_enabled) {
-    setup_velocity_subscriber();
-  } else if (!mc_now_enabled && mc_was_enabled) {
-    odom_sub_.reset();
-    twist_sub_.reset();
+  // Toggle IMU subscriber
+  bool imu_was_enabled = (imu_sub_ != nullptr);
+  bool imu_now_enabled = config_.motion_compensation.enabled;
+  if (imu_now_enabled && !imu_was_enabled) {
+    setup_imu_subscriber();
+  } else if (!imu_now_enabled && imu_was_enabled) {
+    imu_sub_.reset();
     RCLCPP_INFO(get_logger(), "motion compensation disabled");
   }
 

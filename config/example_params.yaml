@@ -30,18 +30,23 @@ polka:
     max_source_spread_warn: 0.05     # seconds - warn if source timestamps differ by more
 
     # --------------------------------------------------
-    # Motion Compensation
+    # Motion Compensation (IMU-based deskewing)
     # --------------------------------------------------
-    # Corrects for robot motion between source timestamps using
-    # first-order (constant velocity) approximation.
-    # Requires a velocity source: Odometry or TwistStamped.
+    # Corrects for robot motion during LiDAR scans using IMU data.
+    # Per-point deskewing uses per-point timestamps from the LiDAR driver
+    # and the SE(3) exponential map motion model (angular velocity + acceleration).
+    # Inter-source alignment corrects for timing offsets between different sensors.
+    # Motion model inspired by rko_lio (Malladi et al., 2025, arXiv:2509.06593).
 
     motion_compensation:
       enabled: false
-      velocity_topic: "~/odom"       # topic providing robot velocity
-      velocity_type: "odometry"      # "odometry" (nav_msgs/Odometry)
-                                     # or "twist_stamped" (geometry_msgs/TwistStamped)
-      max_velocity_age: 0.2          # seconds - ignore stale velocity data
+      imu_topic: ""                  # sensor_msgs/Imu topic (empty = disabled)
+      max_imu_age: 0.2              # seconds - reject stale IMU data
+      imu_buffer_size: 200           # ring buffer capacity (~1s at 200Hz)
+      per_point_deskew: true         # per-point correction within each scan
+                                     # requires per-point timestamps in PointCloud2
+                                     # (auto-detects 'time', 't', 'timestamp', etc.)
+      deskew_timestamp_field: "auto" # "auto" or specific field name (e.g. "time")
 
     # --------------------------------------------------
     # Outputs

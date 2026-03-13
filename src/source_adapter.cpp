@@ -13,6 +13,8 @@
 // limitations under the License.
 
 #include "polka/source_adapter.hpp"
+#include "polka/polka_node.hpp"  // for AveragedImu definition
+#include "polka/se3_exp.hpp"
 #include "polka/filters/range_filter.hpp"
 #include "polka/filters/angular_filter.hpp"
 #include "polka/filters/box_filter.hpp"
@@ -20,10 +22,16 @@
 #include <pcl_conversions/pcl_conversions.h>
 #include <sensor_msgs/msg/point_field.hpp>
 
+#include <cstring>
+
 namespace polka {
 
-SourceAdapter::SourceAdapter(rclcpp::Node * node, const SourceConfig & config, bool gpu_filters)
-: node_(node), config_(config), logger_(node->get_logger()), gpu_filters_(gpu_filters)
+SourceAdapter::SourceAdapter(rclcpp::Node * node, const SourceConfig & config, bool gpu_filters,
+                             ImuGetter imu_getter, bool deskew_enabled,
+                             const std::string & timestamp_field_hint)
+: node_(node), config_(config), logger_(node->get_logger()), gpu_filters_(gpu_filters),
+  get_imu_(std::move(imu_getter)), deskew_enabled_(deskew_enabled),
+  timestamp_field_hint_(timestamp_field_hint)
 {
   // Build QoS
   rclcpp::QoS qos(config.qos_history_depth);
@@ -55,10 +63,11 @@ SourceAdapter::SourceAdapter(rclcpp::Node * node, const SourceConfig & config, b
       filters_.push_back(std::make_unique<BoxFilter>(fp.box_min, fp.box_max));
   }
 
-  RCLCPP_INFO(logger_, "polka: source '%s' subscribed to '%s' (%s), %zu filters",
+  RCLCPP_INFO(logger_, "polka: source '%s' subscribed to '%s' (%s), %zu filters%s",
     config.name.c_str(), config.topic.c_str(),
     config.type == SourceType::POINTCLOUD2 ? "PointCloud2" : "LaserScan",
-    filters_.size());
+    filters_.size(),
+    deskew_enabled_ ? ", deskewing enabled" : "");
 }
 
 bool SourceAdapter::validate_fields(const sensor_msgs::msg::PointCloud2 & msg)
@@ -76,6 +85,91 @@ bool SourceAdapter::validate_fields(const sensor_msgs::msg::PointCloud2 & msg)
     return false;
   }
   return true;
+}
+
+void SourceAdapter::detect_timestamp_field(const sensor_msgs::msg::PointCloud2 & msg)
+{
+  timestamp_field_detected_ = true;
+  has_timestamp_field_ = false;
+
+  // Known per-point timestamp field names (priority order)
+  static const std::vector<std::string> known_names = {
+    "time", "t", "timestamp", "time_stamp", "offset_time", "timeStamp"
+  };
+
+  std::vector<std::string> candidates;
+  if (timestamp_field_hint_ != "auto") {
+    candidates.push_back(timestamp_field_hint_);
+  } else {
+    candidates = known_names;
+  }
+
+  for (const auto & field : msg.fields) {
+    for (const auto & name : candidates) {
+      if (field.name == name) {
+        if (field.datatype == sensor_msgs::msg::PointField::FLOAT32 ||
+            field.datatype == sensor_msgs::msg::PointField::FLOAT64) {
+          has_timestamp_field_ = true;
+          timestamp_field_offset_ = field.offset;
+          timestamp_field_datatype_ = field.datatype;
+          RCLCPP_INFO(logger_,
+            "polka: source '%s' detected per-point timestamp field '%s' (offset=%u, %s)",
+            config_.name.c_str(), field.name.c_str(), field.offset,
+            field.datatype == sensor_msgs::msg::PointField::FLOAT64 ? "FLOAT64" : "FLOAT32");
+          return;
+        }
+      }
+    }
+  }
+
+  RCLCPP_INFO(logger_,
+    "polka: source '%s' has no per-point timestamp field, per-point deskewing disabled",
+    config_.name.c_str());
+}
+
+double SourceAdapter::extract_point_time(const uint8_t * point_data) const
+{
+  if (timestamp_field_datatype_ == sensor_msgs::msg::PointField::FLOAT64) {
+    double val;
+    std::memcpy(&val, point_data + timestamp_field_offset_, sizeof(double));
+    return val;
+  } else {
+    float val;
+    std::memcpy(&val, point_data + timestamp_field_offset_, sizeof(float));
+    return static_cast<double>(val);
+  }
+}
+
+void SourceAdapter::deskew_cloud(
+  CloudT & cloud,
+  const sensor_msgs::msg::PointCloud2 & raw_msg,
+  const AveragedImu & imu)
+{
+  size_t n = cloud.size();
+  if (n == 0 || n != static_cast<size_t>(raw_msg.width) * raw_msg.height) return;
+
+  const Eigen::Vector3d angular_vel = imu.angular_vel;
+  const Eigen::Vector3d accel = imu.linear_accel;
+  const double header_sec = rclcpp::Time(raw_msg.header.stamp).seconds();
+
+  const uint8_t * raw_data = raw_msg.data.data();
+  const uint32_t point_step = raw_msg.point_step;
+
+  for (size_t i = 0; i < n; ++i) {
+    double pt_time = extract_point_time(raw_data + i * point_step);
+
+    // Interpret: if >1e8 it's absolute Unix time, otherwise relative offset from scan start
+    double dt = (pt_time > 1e8) ? (pt_time - header_sec) : pt_time;
+
+    if (std::abs(dt) < 1e-9) continue;
+
+    Eigen::Isometry3d delta = compute_motion_delta(angular_vel, accel, dt);
+    Eigen::Vector3d p(cloud[i].x, cloud[i].y, cloud[i].z);
+    Eigen::Vector3d corrected = delta.inverse() * p;
+    cloud[i].x = static_cast<float>(corrected.x());
+    cloud[i].y = static_cast<float>(corrected.y());
+    cloud[i].z = static_cast<float>(corrected.z());
+  }
 }
 
 void SourceAdapter::apply_filters(CloudT & cloud)
@@ -103,8 +197,20 @@ void SourceAdapter::pc2_callback(sensor_msgs::msg::PointCloud2::ConstSharedPtr m
   }
   if (!fields_valid_) return;
 
+  // Detect per-point timestamp field on first message
+  if (!timestamp_field_detected_)
+    detect_timestamp_field(*msg);
+
   auto cloud = std::make_shared<CloudT>();
   pcl::fromROSMsg(*msg, *cloud);
+
+  // Per-point deskewing (before filters, in sensor frame)
+  if (deskew_enabled_ && has_timestamp_field_ && get_imu_) {
+    auto imu = get_imu_();
+    if (imu && imu->valid)
+      deskew_cloud(*cloud, *msg, *imu);
+  }
+
   apply_filters(*cloud);
   store_cloud(cloud, msg->header);
 }

@@ -26,7 +26,7 @@ polka:
     output_rate: 20.0                # Hz - merged output publish rate
     source_timeout: 0.5              # seconds - drop source if no data within this window
     enable_gpu: true                 # use CUDA GPU pipeline when available (falls back to CPU)
-    timestamp_strategy: "earliest"   # "earliest" | "latest" | "average" | "local"
+    timestamp_strategy: "latest"     # "earliest" | "latest" | "average" | "local"
     max_source_spread_warn: 0.05     # seconds - warn if source timestamps differ by more
 
     # --------------------------------------------------

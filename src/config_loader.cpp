@@ -33,11 +33,13 @@ void ConfigLoader::declare_defaults()
   node_->declare_parameter<std::string>("timestamp_strategy", "earliest");
   node_->declare_parameter<double>("max_source_spread_warn", 0.05);
 
-  // motion compensation
+  // motion compensation (IMU-based deskewing)
   node_->declare_parameter<bool>("motion_compensation.enabled", false);
-  node_->declare_parameter<std::string>("motion_compensation.velocity_topic", "~/odom");
-  node_->declare_parameter<std::string>("motion_compensation.velocity_type", "odometry");
-  node_->declare_parameter<double>("motion_compensation.max_velocity_age", 0.2);
+  node_->declare_parameter<std::string>("motion_compensation.imu_topic", "");
+  node_->declare_parameter<double>("motion_compensation.max_imu_age", 0.2);
+  node_->declare_parameter<int>("motion_compensation.imu_buffer_size", 200);
+  node_->declare_parameter<bool>("motion_compensation.per_point_deskew", true);
+  node_->declare_parameter<std::string>("motion_compensation.deskew_timestamp_field", "auto");
 
   // outputs.cloud
   node_->declare_parameter<bool>("outputs.cloud.enabled", true);
@@ -136,15 +138,19 @@ MergeConfig ConfigLoader::load()
   else if (ts_str == "local") cfg.timestamp_strategy = TimestampStrategy::LOCAL;
   else throw std::runtime_error("polka: invalid timestamp_strategy '" + ts_str + "'");
 
-  // Motion compensation
+  // Motion compensation (IMU-based deskewing)
   cfg.motion_compensation.enabled =
     node_->get_parameter("motion_compensation.enabled").as_bool();
-  cfg.motion_compensation.velocity_topic =
-    node_->get_parameter("motion_compensation.velocity_topic").as_string();
-  cfg.motion_compensation.velocity_type =
-    node_->get_parameter("motion_compensation.velocity_type").as_string();
-  cfg.motion_compensation.max_velocity_age =
-    node_->get_parameter("motion_compensation.max_velocity_age").as_double();
+  cfg.motion_compensation.imu_topic =
+    node_->get_parameter("motion_compensation.imu_topic").as_string();
+  cfg.motion_compensation.max_imu_age =
+    node_->get_parameter("motion_compensation.max_imu_age").as_double();
+  cfg.motion_compensation.imu_buffer_size =
+    node_->get_parameter("motion_compensation.imu_buffer_size").as_int();
+  cfg.motion_compensation.per_point_deskew =
+    node_->get_parameter("motion_compensation.per_point_deskew").as_bool();
+  cfg.motion_compensation.deskew_timestamp_field =
+    node_->get_parameter("motion_compensation.deskew_timestamp_field").as_string();
 
   // Cloud output
   cfg.cloud_output.enabled = node_->get_parameter("outputs.cloud.enabled").as_bool();
@@ -247,15 +253,19 @@ MergeConfig ConfigLoader::reload(const std::vector<std::string> & source_names)
   else if (ts_str == "local") cfg.timestamp_strategy = TimestampStrategy::LOCAL;
   else throw std::runtime_error("polka: invalid timestamp_strategy '" + ts_str + "'");
 
-  // Motion compensation
+  // Motion compensation (IMU-based deskewing)
   cfg.motion_compensation.enabled =
     node_->get_parameter("motion_compensation.enabled").as_bool();
-  cfg.motion_compensation.velocity_topic =
-    node_->get_parameter("motion_compensation.velocity_topic").as_string();
-  cfg.motion_compensation.velocity_type =
-    node_->get_parameter("motion_compensation.velocity_type").as_string();
-  cfg.motion_compensation.max_velocity_age =
-    node_->get_parameter("motion_compensation.max_velocity_age").as_double();
+  cfg.motion_compensation.imu_topic =
+    node_->get_parameter("motion_compensation.imu_topic").as_string();
+  cfg.motion_compensation.max_imu_age =
+    node_->get_parameter("motion_compensation.max_imu_age").as_double();
+  cfg.motion_compensation.imu_buffer_size =
+    node_->get_parameter("motion_compensation.imu_buffer_size").as_int();
+  cfg.motion_compensation.per_point_deskew =
+    node_->get_parameter("motion_compensation.per_point_deskew").as_bool();
+  cfg.motion_compensation.deskew_timestamp_field =
+    node_->get_parameter("motion_compensation.deskew_timestamp_field").as_string();
 
   cfg.cloud_output.enabled = node_->get_parameter("outputs.cloud.enabled").as_bool();
   cfg.cloud_output.topic = node_->get_parameter("outputs.cloud.topic").as_string();

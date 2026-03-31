@@ -4,32 +4,116 @@
   <img src="images/polka.png" alt="Polka" width="600"/>
 </p>
 
-**Multi-LiDAR fusion node for ROS 2** — merges any mix of PointCloud2 and LaserScan sources into unified output, with optional CUDA GPU acceleration.
+**One node to fuse them all.** Polka merges any mix of PointCloud2 and LaserScan sources into unified output — with per-source filtering, IMU deskewing, and optional CUDA acceleration. It replaces the 7+ node `pcl_ros` / `ira_laser_tools` chains with a single composable ROS 2 node.
 
-Replaces multi-node pipelines (`relay → filter → transform → merge → downsample`) with a single composable node.
+## Performance
 
-## Why it exists ?
+```
+┌──────────────────────────────────────────────────────────────────────┐
+│                          POLKA BENCHMARK                             │
+│  dual LiDAR · filtering + fusion + PointCloud2 & LaserScan output   │
+├────────────────┬────────────────────┬────────────────────────────────┤
+│                │  CPU only          │  CUDA (GPU)                    │
+├────────────────┼────────────────────┼────────────────────────────────┤
+│  Latency       │  45 ms             │  45 ms                        │
+│  Compute load  │  12%               │  3%                           │
+└────────────────┴────────────────────┴────────────────────────────────┘
+```
 
-- **Heterogeneous source fusion**: mix PointCloud2 and LaserScan sensors freely
-- **Dual output**: publish merged PointCloud2, LaserScan, or both
-- **Per-source filtering**: range, angular, box filters applied before merge
-- **Output filtering**: range, angular, box, height, footprint (ego-body exclusion), voxel downsample — applied in fixed order after merge
-- **IMU deskewing**: per-point SE(3) motion correction using IMU angular velocity and acceleration; auto-detects per-point timestamp fields (`time`, `t`, `timestamp`, etc.)
-- **CUDA acceleration**: optional GPU merge engine with fused kernels and pre-allocated buffers
-- **TF2 fallback**: automatic transform lookup; falls back to last known good on dropout
-- **Composable node**: standalone or loaded into a component container
-- **Fully parameterized**: every feature runtime-configurable via ROS 2 parameters
+Same latency, quarter the CPU cost on GPU. The CUDA path frees the Jetson's ARM cores for SLAM and navigation.
 
-## Dependencies
+## Features
 
-| Package | Purpose |
-|---|---|
-| `rclcpp` / `rclcpp_components` | ROS 2 node framework |
-| `sensor_msgs` | PointCloud2, LaserScan, Imu |
-| `tf2_ros` / `tf2_eigen` | Frame transforms |
-| `pcl_conversions` | PCL ↔ ROS message conversion |
-| `laser_geometry` | LaserScan → PointCloud2 projection |
-| CUDA toolkit | **Optional** — GPU merge engine only |
+```mermaid
+graph TD
+    subgraph "What goes in"
+        A["Any PointCloud2 source"]
+        B["Any LaserScan source"]
+        C["IMU (optional)"]
+    end
+
+    subgraph "What Polka does"
+        D["Per-source filtering
+        range · angular · box"]
+        E["TF2 transform to output frame
+        auto-fallback on dropout"]
+        F["Merge engine
+        CPU or CUDA"]
+        G["IMU deskewing
+        per-point SE(3) correction"]
+        H["Output filtering
+        range · angular · box ·
+        height · footprint · voxel"]
+    end
+
+    subgraph "What comes out"
+        I["Merged PointCloud2"]
+        J["Merged LaserScan"]
+    end
+
+    A --> D --> E --> F
+    B --> D
+    C -.-> G -.-> F
+    F --> H --> I
+    H --> J
+```
+
+**Heterogeneous source fusion** — mix PointCloud2 and LaserScan sensors freely; Polka normalizes everything internally.
+
+**Dual output** — publish merged PointCloud2, LaserScan, or both from the same pipeline. No need for a separate `pointcloud_to_laserscan` chain.
+
+**Per-source filtering** — range, angular, and box filters run *before* merge, so you reject garbage early instead of burning cycles transforming and merging points you'll throw away.
+
+**Output filter chain** — after merge, a fixed-order pipeline applies: range/angular/box → footprint exclusion (ego-body) → height band → voxel downsample. All stages independently toggleable.
+
+**IMU deskewing** — per-point SE(3) motion correction using constant-acceleration + constant-angular-velocity model. Auto-detects per-point timestamp fields (`time`, `t`, `timestamp`, etc.). Inter-source alignment corrects timing offsets between sensors. Motion model inspired by [rko_lio](https://github.com/TixiaoShan/rko_lio) (Malladi et al., 2025).
+
+**CUDA acceleration** — optional GPU merge engine with fused kernels and pre-allocated buffers. Falls back to CPU transparently if CUDA is unavailable.
+
+**TF2 fallback** — automatic transform lookup with fallback to last known good on dropout. No crashes from momentary TF gaps.
+
+**Composable node** — run standalone or load into a component container for zero-copy intra-process transport.
+
+**Fully parameterized** — every feature is runtime-configurable via ROS 2 parameters.
+
+## What it replaces
+
+Polka collapses two parallel multi-node chains into one:
+
+```mermaid
+graph LR
+    subgraph "Before: 7+ nodes"
+        direction TB
+
+        subgraph "cloud path"
+            CC[ConcatenatePointCloud\n+ ApproxTimeSynchronizer] --> CF[custom filter node]
+        end
+
+        subgraph "scan path"
+            P2L1[pointcloud_to_laserscan] --> IRA[ira_laser_tools\nLaserscanMerger]
+            P2L2[pointcloud_to_laserscan] --> IRA
+            IRA --> SF[custom filter node]
+        end
+    end
+
+    subgraph "After: 1 node"
+        POLKA["<strong>polka</strong>
+        filter → transform → merge →
+        filter → publish cloud + scan"]
+    end
+```
+
+Same functionality. One process. One config file.
+
+## Quick start
+
+```bash
+cp config/example_params.yaml config/my_robot.yaml
+# Edit: set output_frame_id, list sensors under source_names, configure per-source topics/filters
+ros2 launch polka polka.launch.py params_file:=config/my_robot.yaml
+```
+
+Ensure TF is published from each sensor's `frame_id` to your `output_frame_id`.
 
 ## Build
 
@@ -41,34 +125,22 @@ colcon build --packages-select polka
 colcon build --packages-select polka --cmake-args -DPOLKA_ENABLE_CUDA=ON
 ```
 
-## Quick Start
-
-```bash
-cp config/example_params.yaml config/my_robot.yaml
-# Edit: set output_frame_id, list sensors under source_names, configure per-source topics/filters
-ros2 launch polka polka.launch.py params_file:=config/my_robot.yaml
-```
-
-Ensure TF is published from each sensor's `frame_id` to your `output_frame_id`.
-
 ## Configuration
 
 All parameters live under the `polka` namespace. See [config/example_params.yaml](config/example_params.yaml) for the full annotated reference.
 
-### Key Parameters
+### Core parameters
 
-| Parameter | Default | Description |
+| Parameter | Default | What it controls |
 |---|---|---|
 | `output_frame_id` | `"base_link"` | Target frame for merged output |
 | `output_rate` | `20.0` | Merge + publish rate (Hz) |
-| `source_timeout` | `0.5` | Drop source if no data within this window (s) |
+| `source_timeout` | `0.5` | Drop source if silent for this long (s) |
 | `timestamp_strategy` | `"earliest"` | Output stamp: `earliest`, `latest`, `average`, or `local` |
 
-### Motion Compensation (IMU Deskewing)
+### Motion compensation (IMU deskewing)
 
-Per-point deskewing uses the SE(3) exponential map with constant-acceleration + constant-angular-velocity, applied per point based on its timestamp. Inter-source alignment corrects timing offsets between sensors.
-
-Motion model inspired by [rko_lio](https://github.com/TixiaoShan/rko_lio) (Malladi et al., 2025).
+Per-point deskewing applies the SE(3) exponential map with constant-acceleration + constant-angular-velocity per point based on its intra-scan timestamp.
 
 ```yaml
 motion_compensation:
@@ -80,9 +152,9 @@ motion_compensation:
   deskew_timestamp_field: "auto"  # auto-detects 'time', 't', 'timestamp', etc.
 ```
 
-### Output Filters
+### Output filters
 
-Applied after merge in this order: output filters (range/angular/box) → footprint filter → height filter → voxel downsample.
+Applied after merge in fixed order: range/angular/box → footprint → height → voxel.
 
 ```yaml
 outputs:
@@ -106,107 +178,18 @@ outputs:
         z_max:  0.50
 ```
 
-## Pipeline Comparison
+## Dependencies
 
-### polka (1 node)
+| Package | Purpose |
+|---|---|
+| `rclcpp` / `rclcpp_components` | ROS 2 node framework |
+| `sensor_msgs` | PointCloud2, LaserScan, Imu |
+| `tf2_ros` / `tf2_eigen` | Frame transforms |
+| `pcl_conversions` | PCL ↔ ROS message conversion |
+| `laser_geometry` | LaserScan → PointCloud2 projection |
+| CUDA toolkit | **Optional** — GPU merge engine only |
 
-```mermaid
-graph LR
-    subgraph Drivers
-        D1[lidar driver · front]
-        D2[odom / cmd_vel]
-        D3[lidar driver · back]
-    end
-
-    P[<strong>polka</strong>]
-
-    subgraph Consumers
-        C1[mapping / reconstruction<br/>~/merged_cloud]
-        C2[localization / navigation<br/>~/merged_scan]
-    end
-
-    D1 --> P
-    D2 -.-> P
-    D3 --> P
-    P --> C1
-    P --> C2
-```
-
-### pcl_ros chain (7+ nodes)
-
-Cloud path:
-
-```mermaid
-graph LR
-    subgraph Drivers
-        D1[lidar driver · front]
-        D2[lidar driver · back]
-    end
-
-    CAT[pcl_ros::<br/>ConcatenatePointCloud<br/>+ ApproxTimeSynchronizer]
-    CF[custom node<br/>cloud filters]
-    MAP[mapping node]
-
-    D1 --> CAT
-    D2 --> CAT
-    CAT --> CF -->|merged_cloud| MAP
-```
-
-Scan path:
-
-```mermaid
-graph LR
-    subgraph Drivers
-        D1[lidar driver · front]
-        D2[lidar driver · back]
-    end
-
-    P2L1[pointcloud_to_laserscan<br/>· front]
-    P2L2[pointcloud_to_laserscan<br/>· back]
-    IRA[ira_laser_tools::<br/>LaserscanMerger]
-    SF[custom node<br/>scan filters]
-    NAV[localization / navigation]
-
-    D1 --> P2L1
-    D2 --> P2L2
-    P2L1 --> IRA
-    P2L2 --> IRA
-    IRA --> SF -->|merged_scan| NAV
-```
-
-## Architecture
-
-```mermaid
-graph LR
-    subgraph Sources
-        PC[PointCloud2<br/>/front/points]
-        LS[LaserScan<br/>/rear/scan]
-    end
-
-    subgraph Per-Source Filters
-        PF1[Range / Angular /<br/>Box Filter]
-        PF2[Range / Angular /<br/>Box Filter]
-    end
-
-    subgraph Merge Engine
-        ME[CPU or CUDA<br/>Merge]
-    end
-
-    subgraph Output Pipeline
-        OF[Range / Angular /<br/>Box Filter]
-        FF[Footprint Filter]
-        HF[Height Filter]
-        VX[Voxel Downsample]
-    end
-
-    PC --> PF1 --> ME
-    LS --> PF2 --> ME
-    ME --> OF --> FF --> HF --> VX
-    VX --> OUT_PC[PointCloud2]
-    VX --> OUT_LS[LaserScan]
-```
-
-## File Structure
+## File structure
 
 ```
 polka/

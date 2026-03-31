@@ -4,7 +4,7 @@
   <img src="images/polka.png" alt="Polka" width="600"/>
 </p>
 
-**One node to fuse them all.** Polka merges any mix of PointCloud2 and LaserScan sources into unified output — with per-source filtering, IMU deskewing, and optional CUDA acceleration. It replaces the 7+ node `pcl_ros` / `ira_laser_tools` chains with a single composable ROS 2 node.
+**One node to fuse them all.** Polka merges any mix of PointCloud2 and LaserScan sources into unified output - with per-source filtering, IMU deskewing, and optional CUDA acceleration. It replaces the 7+ node `pcl_ros` / `ira_laser_tools` chains with a single composable ROS 2 node.
 
 ## Performance
 
@@ -58,23 +58,23 @@ graph TD
     H --> J
 ```
 
-**Heterogeneous source fusion** — mix PointCloud2 and LaserScan sensors freely; Polka normalizes everything internally.
+**Heterogeneous source fusion** - mix PointCloud2 and LaserScan sensors freely; Polka normalizes everything internally.
 
-**Dual output** — publish merged PointCloud2, LaserScan, or both from the same pipeline. No need for a separate `pointcloud_to_laserscan` chain.
+**Dual output** - publish merged PointCloud2, LaserScan, or both from the same pipeline. No need for a separate `pointcloud_to_laserscan` chain.
 
-**Per-source filtering** — range, angular, and box filters run *before* merge, so you reject garbage early instead of burning cycles transforming and merging points you'll throw away.
+**Per-source filtering** - range, angular, and box filters run *before* merge, so you reject garbage early instead of burning cycles transforming and merging points you'll throw away.
 
-**Output filter chain** — after merge, a fixed-order pipeline applies: range/angular/box → footprint exclusion (ego-body) → height band → voxel downsample. All stages independently toggleable.
+**Output filter chain** - after merge, a fixed-order pipeline applies: range/angular/box → footprint exclusion (ego-body) → height band → voxel downsample. All stages independently toggleable.
 
-**IMU deskewing** — per-point SE(3) motion correction using constant-acceleration + constant-angular-velocity model. Auto-detects per-point timestamp fields (`time`, `t`, `timestamp`, etc.). Inter-source alignment corrects timing offsets between sensors. Motion model inspired by [rko_lio](https://github.com/TixiaoShan/rko_lio) (Malladi et al., 2025).
+**IMU deskewing** - per-point SE(3) motion correction using constant-acceleration + constant-angular-velocity model. Auto-detects per-point timestamp fields (`time`, `t`, `timestamp`, etc.). Inter-source alignment corrects timing offsets between sensors. Motion model inspired by [rko_lio](https://github.com/TixiaoShan/rko_lio) (Malladi et al., 2025).
 
-**CUDA acceleration** — optional GPU merge engine with fused kernels and pre-allocated buffers. Falls back to CPU transparently if CUDA is unavailable.
+**CUDA acceleration** - optional GPU merge engine with fused kernels and pre-allocated buffers. Falls back to CPU transparently if CUDA is unavailable.
 
-**TF2 fallback** — automatic transform lookup with fallback to last known good on dropout. No crashes from momentary TF gaps.
+**TF2 fallback** - automatic transform lookup with fallback to last known good on dropout. No crashes from momentary TF gaps.
 
-**Composable node** — run standalone or load into a component container for zero-copy intra-process transport.
+**Composable node** - run standalone or load into a component container for zero-copy intra-process transport.
 
-**Fully parameterized** — every feature is runtime-configurable via ROS 2 parameters.
+**Fully parameterized** - every feature is runtime-configurable via ROS 2 parameters.
 
 ## What it replaces
 
@@ -187,7 +187,7 @@ outputs:
 | `tf2_ros` / `tf2_eigen` | Frame transforms |
 | `pcl_conversions` | PCL ↔ ROS message conversion |
 | `laser_geometry` | LaserScan → PointCloud2 projection |
-| CUDA toolkit | **Optional** — GPU merge engine only |
+| CUDA toolkit | **Optional** - GPU merge engine only |
 
 ## File structure
 

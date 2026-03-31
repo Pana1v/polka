@@ -78,27 +78,72 @@ graph TD
 
 Polka collapses two parallel multi-node chains into one:
 
+## Pipeline Comparison
+
+### polka (1 node)
+
 ```mermaid
 graph LR
-    subgraph "Before: 7+ nodes"
-        direction TB
-
-        subgraph "cloud path"
-            CC[ConcatenatePointCloud\n+ ApproxTimeSynchronizer] --> CF[custom filter node]
-        end
-
-        subgraph "scan path"
-            P2L1[pointcloud_to_laserscan] --> IRA[ira_laser_tools\nLaserscanMerger]
-            P2L2[pointcloud_to_laserscan] --> IRA
-            IRA --> SF[custom filter node]
-        end
+    subgraph Drivers
+        D1[lidar driver · front]
+        D2[odom / cmd_vel]
+        D3[lidar driver · back]
     end
 
-    subgraph "After: 1 node"
-        POLKA["<strong>polka</strong>
-        filter → transform → merge →
-        filter → publish cloud + scan"]
+    P[<strong>polka</strong>]
+
+    subgraph Consumers
+        C1[mapping / reconstruction<br/>~/merged_cloud]
+        C2[localization / navigation<br/>~/merged_scan]
     end
+
+    D1 --> P
+    D2 -.-> P
+    D3 --> P
+    P --> C1
+    P --> C2
+```
+
+### pcl_ros chain (7+ nodes)
+
+Cloud path:
+
+```mermaid
+graph LR
+    subgraph Drivers
+        D1[lidar driver · front]
+        D2[lidar driver · back]
+    end
+
+    CAT[pcl_ros::<br/>ConcatenatePointCloud<br/>+ ApproxTimeSynchronizer]
+    CF[custom node<br/>cloud filters]
+    MAP[mapping node]
+
+    D1 --> CAT
+    D2 --> CAT
+    CAT --> CF -->|merged_cloud| MAP
+```
+
+Scan path:
+
+```mermaid
+graph LR
+    subgraph Drivers
+        D1[lidar driver · front]
+        D2[lidar driver · back]
+    end
+
+    P2L1[pointcloud_to_laserscan<br/>· front]
+    P2L2[pointcloud_to_laserscan<br/>· back]
+    IRA[ira_laser_tools::<br/>LaserscanMerger]
+    SF[custom node<br/>scan filters]
+    NAV[localization / navigation]
+
+    D1 --> P2L1
+    D2 --> P2L2
+    P2L1 --> IRA
+    P2L2 --> IRA
+    IRA --> SF -->|merged_scan| NAV
 ```
 
 Same functionality. One process. One config file.

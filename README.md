@@ -8,7 +8,7 @@
 
 Replaces multi-node pipelines (`relay → filter → transform → merge → downsample`) with a single composable node.
 
-## Features
+## Why it exists ?
 
 - **Heterogeneous source fusion**: mix PointCloud2 and LaserScan sensors freely
 - **Dual output**: publish merged PointCloud2, LaserScan, or both

@@ -1,7 +1,7 @@
 # POLKA
 
 <p align="center">
-  <img src="images/polka.png" alt="Polka" width="300"/>
+  <img src="images/polka.png" alt="Polka" width="700"/>
 </p>
 
 **Multi-LiDAR fusion node for ROS 2** that merges any mix of PointCloud2 and LaserScan sources into a unified output, with optional CUDA GPU acceleration.

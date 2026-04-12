@@ -59,6 +59,16 @@ polka:
         enabled: true
         topic: "~/merged_cloud"
 
+        # QoS profile for the published PointCloud2
+        qos:
+          reliability: "reliable"             # "best_effort" or "reliable"
+          durability: "volatile"              # "volatile" or "transient_local"
+          history_depth: 10                   # keep-last queue depth
+          liveliness: "automatic"             # "automatic", "manual_by_node", or "manual_by_topic"
+          liveliness_lease_duration_ms: 0.0   # milliseconds (0 = infinite/system default)
+          deadline_ms: 0.0                    # milliseconds (0 = infinite/no deadline)
+          lifespan_ms: 0.0                    # milliseconds (0 = infinite/no expiry)
+
         # Post-merge filters (applied to the merged cloud before publishing)
         # All filters are independent and applied in this order:
         #   range -> angular -> box -> height filter -> footprint filter -> voxel
@@ -131,6 +141,17 @@ polka:
       scan:
         enabled: true
         topic: "~/merged_scan"
+
+        # QoS profile for the published LaserScan
+        qos:
+          reliability: "reliable"
+          durability: "volatile"
+          history_depth: 10
+          liveliness: "automatic"
+          liveliness_lease_duration_ms: 0.0
+          deadline_ms: 0.0
+          lifespan_ms: 0.0
+
         z_min: -0.10                 # meters - bottom of horizontal slice
         z_max:  0.50                 # meters - top of horizontal slice
         angle_min: -3.14159265       # radians - scan start angle (full 360)

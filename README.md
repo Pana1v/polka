@@ -6,6 +6,19 @@
 
 **Multi-LiDAR fusion node for ROS 2** that merges any mix of PointCloud2 and LaserScan sources into a unified output, with optional CUDA GPU acceleration.
 
+## Supported ROS 2 Distributions
+
+| Distro | Ubuntu | Branch |
+|--------|--------|--------|
+| Humble | 22.04  | [`humble`](../../tree/humble) |
+| Jazzy  | 24.04  | [`jazzy`](../../tree/jazzy) |
+
+```bash
+# Clone the branch matching your distro
+git clone -b humble https://github.com/Pan-Navigator/polka.git  # Humble
+git clone -b jazzy  https://github.com/Pan-Navigator/polka.git  # Jazzy
+```
+
 Polka replaces multi-node pipelines (relay -> filter -> transform -> merge -> downsample) with a single composable node, dramatically reducing latency, CPU overhead, and configuration complexity.
 
 ## Why Polka?

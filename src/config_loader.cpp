@@ -44,6 +44,13 @@ void ConfigLoader::declare_defaults()
   // outputs.cloud
   node_->declare_parameter<bool>("outputs.cloud.enabled", true);
   node_->declare_parameter<std::string>("outputs.cloud.topic", "~/merged_cloud");
+  node_->declare_parameter<std::string>("outputs.cloud.qos.reliability", "reliable");
+  node_->declare_parameter<std::string>("outputs.cloud.qos.durability", "volatile");
+  node_->declare_parameter<int>("outputs.cloud.qos.history_depth", 10);
+  node_->declare_parameter<std::string>("outputs.cloud.qos.liveliness", "automatic");
+  node_->declare_parameter<double>("outputs.cloud.qos.liveliness_lease_duration_ms", 0.0);
+  node_->declare_parameter<double>("outputs.cloud.qos.deadline_ms", 0.0);
+  node_->declare_parameter<double>("outputs.cloud.qos.lifespan_ms", 0.0);
   node_->declare_parameter<bool>("outputs.cloud.filters.range.enabled", false);
   node_->declare_parameter<double>("outputs.cloud.filters.range.min", 0.1);
   node_->declare_parameter<double>("outputs.cloud.filters.range.max", 30.0);
@@ -78,6 +85,13 @@ void ConfigLoader::declare_defaults()
   // outputs.scan
   node_->declare_parameter<bool>("outputs.scan.enabled", false);
   node_->declare_parameter<std::string>("outputs.scan.topic", "~/merged_scan");
+  node_->declare_parameter<std::string>("outputs.scan.qos.reliability", "reliable");
+  node_->declare_parameter<std::string>("outputs.scan.qos.durability", "volatile");
+  node_->declare_parameter<int>("outputs.scan.qos.history_depth", 10);
+  node_->declare_parameter<std::string>("outputs.scan.qos.liveliness", "automatic");
+  node_->declare_parameter<double>("outputs.scan.qos.liveliness_lease_duration_ms", 0.0);
+  node_->declare_parameter<double>("outputs.scan.qos.deadline_ms", 0.0);
+  node_->declare_parameter<double>("outputs.scan.qos.lifespan_ms", 0.0);
   node_->declare_parameter<double>("outputs.scan.z_min", -0.15);
   node_->declare_parameter<double>("outputs.scan.z_max", 0.15);
   node_->declare_parameter<double>("outputs.scan.angle_min", -3.14159265);
@@ -87,6 +101,20 @@ void ConfigLoader::declare_defaults()
   node_->declare_parameter<double>("outputs.scan.range_max", 100.0);
 
   node_->declare_parameter<std::vector<std::string>>("source_names", std::vector<std::string>{});
+}
+
+OutputQosConfig ConfigLoader::load_output_qos(const std::string & prefix)
+{
+  OutputQosConfig qos;
+  qos.reliability = node_->get_parameter(prefix + ".reliability").as_string();
+  qos.durability = node_->get_parameter(prefix + ".durability").as_string();
+  qos.history_depth = node_->get_parameter(prefix + ".history_depth").as_int();
+  qos.liveliness = node_->get_parameter(prefix + ".liveliness").as_string();
+  qos.liveliness_lease_duration_ms =
+    node_->get_parameter(prefix + ".liveliness_lease_duration_ms").as_double();
+  qos.deadline_ms = node_->get_parameter(prefix + ".deadline_ms").as_double();
+  qos.lifespan_ms = node_->get_parameter(prefix + ".lifespan_ms").as_double();
+  return qos;
 }
 
 FilterParams ConfigLoader::load_filter_params(const std::string & prefix)
@@ -155,6 +183,7 @@ MergeConfig ConfigLoader::load()
   // Cloud output
   cfg.cloud_output.enabled = node_->get_parameter("outputs.cloud.enabled").as_bool();
   cfg.cloud_output.topic = node_->get_parameter("outputs.cloud.topic").as_string();
+  cfg.cloud_output.qos = load_output_qos("outputs.cloud.qos");
   cfg.cloud_output.filters = load_filter_params("outputs.cloud.filters");
 
   // Voxel config
@@ -187,6 +216,7 @@ MergeConfig ConfigLoader::load()
   // Scan output
   cfg.scan_output.enabled = node_->get_parameter("outputs.scan.enabled").as_bool();
   cfg.scan_output.topic = node_->get_parameter("outputs.scan.topic").as_string();
+  cfg.scan_output.qos = load_output_qos("outputs.scan.qos");
   cfg.scan_output.flatten.z_min = node_->get_parameter("outputs.scan.z_min").as_double();
   cfg.scan_output.flatten.z_max = node_->get_parameter("outputs.scan.z_max").as_double();
   cfg.scan_output.flatten.angle_min = node_->get_parameter("outputs.scan.angle_min").as_double();
@@ -269,6 +299,7 @@ MergeConfig ConfigLoader::reload(const std::vector<std::string> & source_names)
 
   cfg.cloud_output.enabled = node_->get_parameter("outputs.cloud.enabled").as_bool();
   cfg.cloud_output.topic = node_->get_parameter("outputs.cloud.topic").as_string();
+  cfg.cloud_output.qos = load_output_qos("outputs.cloud.qos");
   cfg.cloud_output.filters = load_filter_params("outputs.cloud.filters");
 
   // Voxel config
@@ -316,6 +347,7 @@ MergeConfig ConfigLoader::reload(const std::vector<std::string> & source_names)
 
   cfg.scan_output.enabled = node_->get_parameter("outputs.scan.enabled").as_bool();
   cfg.scan_output.topic = node_->get_parameter("outputs.scan.topic").as_string();
+  cfg.scan_output.qos = load_output_qos("outputs.scan.qos");
   cfg.scan_output.flatten.z_min = node_->get_parameter("outputs.scan.z_min").as_double();
   cfg.scan_output.flatten.z_max = node_->get_parameter("outputs.scan.z_max").as_double();
   cfg.scan_output.flatten.angle_min = node_->get_parameter("outputs.scan.angle_min").as_double();

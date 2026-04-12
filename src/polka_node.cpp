@@ -38,6 +38,44 @@
 
 namespace polka {
 
+namespace {
+
+rclcpp::QoS build_qos(const OutputQosConfig & cfg)
+{
+  rclcpp::QoS qos(cfg.history_depth);
+
+  if (cfg.reliability == "best_effort")
+    qos.reliability(rclcpp::ReliabilityPolicy::BestEffort);
+  else
+    qos.reliability(rclcpp::ReliabilityPolicy::Reliable);
+
+  if (cfg.durability == "transient_local")
+    qos.durability(rclcpp::DurabilityPolicy::TransientLocal);
+  else
+    qos.durability(rclcpp::DurabilityPolicy::Volatile);
+
+  if (cfg.liveliness == "manual_by_topic")
+    qos.liveliness(rclcpp::LivelinessPolicy::ManualByTopic);
+  else
+    qos.liveliness(rclcpp::LivelinessPolicy::Automatic);
+
+  if (cfg.liveliness_lease_duration_ms > 0.0)
+    qos.liveliness_lease_duration(
+      std::chrono::milliseconds(static_cast<int64_t>(cfg.liveliness_lease_duration_ms)));
+
+  if (cfg.deadline_ms > 0.0)
+    qos.deadline(
+      std::chrono::milliseconds(static_cast<int64_t>(cfg.deadline_ms)));
+
+  if (cfg.lifespan_ms > 0.0)
+    qos.lifespan(
+      std::chrono::milliseconds(static_cast<int64_t>(cfg.lifespan_ms)));
+
+  return qos;
+}
+
+}  // namespace
+
 PolkaNode::PolkaNode(const rclcpp::NodeOptions & options)
 : rclcpp::Node("polka", options), config_loader_(this)
 {
@@ -87,9 +125,11 @@ PolkaNode::PolkaNode(const rclcpp::NodeOptions & options)
   build_output_filters();
 
   if (config_.cloud_output.enabled)
-    cloud_pub_ = create_publisher<sensor_msgs::msg::PointCloud2>(config_.cloud_output.topic, 10);
+    cloud_pub_ = create_publisher<sensor_msgs::msg::PointCloud2>(
+      config_.cloud_output.topic, build_qos(config_.cloud_output.qos));
   if (config_.scan_output.enabled)
-    scan_pub_ = create_publisher<sensor_msgs::msg::LaserScan>(config_.scan_output.topic, 10);
+    scan_pub_ = create_publisher<sensor_msgs::msg::LaserScan>(
+      config_.scan_output.topic, build_qos(config_.scan_output.qos));
 
   if (config_.output_rate > 0.0) {
     auto period = std::chrono::duration<double>(1.0 / config_.output_rate);
@@ -518,13 +558,15 @@ bool PolkaNode::reconfigure()
 
   // Rebuild cloud publisher if toggled
   if (config_.cloud_output.enabled && !prev_cloud_enabled)
-    cloud_pub_ = create_publisher<sensor_msgs::msg::PointCloud2>(config_.cloud_output.topic, 10);
+    cloud_pub_ = create_publisher<sensor_msgs::msg::PointCloud2>(
+      config_.cloud_output.topic, build_qos(config_.cloud_output.qos));
   else if (!config_.cloud_output.enabled && prev_cloud_enabled)
     cloud_pub_.reset();
 
   // Rebuild scan publisher if toggled
   if (config_.scan_output.enabled && !prev_scan_enabled)
-    scan_pub_ = create_publisher<sensor_msgs::msg::LaserScan>(config_.scan_output.topic, 10);
+    scan_pub_ = create_publisher<sensor_msgs::msg::LaserScan>(
+      config_.scan_output.topic, build_qos(config_.scan_output.qos));
   else if (!config_.scan_output.enabled && prev_scan_enabled)
     scan_pub_.reset();
 

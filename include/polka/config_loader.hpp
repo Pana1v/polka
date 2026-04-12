@@ -32,6 +32,7 @@ private:
 
   void declare_defaults();
   FilterParams load_filter_params(const std::string & prefix);
+  OutputQosConfig load_output_qos(const std::string & prefix);
   SelfFilterConfig load_self_filter_config(const std::string & prefix);
   void validate(const MergeConfig & config);
 };

@@ -132,9 +132,20 @@ struct SelfFilterConfig {
   std::vector<ExclusionBox> boxes;
 };
 
+struct OutputQosConfig {
+  std::string reliability = "reliable";
+  std::string durability = "volatile";
+  int history_depth = 10;
+  std::string liveliness = "automatic";
+  double liveliness_lease_duration_ms = 0.0;
+  double deadline_ms = 0.0;
+  double lifespan_ms = 0.0;
+};
+
 struct CloudOutputConfig {
   bool enabled = true;
   std::string topic = "~/merged_cloud";
+  OutputQosConfig qos;
   FilterParams filters;
   HeightCapConfig height_cap;
   VoxelConfig voxel;
@@ -144,6 +155,7 @@ struct CloudOutputConfig {
 struct ScanOutputConfig {
   bool enabled = false;
   std::string topic = "~/merged_scan";
+  OutputQosConfig qos;
   FlattenParams flatten;
 };
 

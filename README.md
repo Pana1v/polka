@@ -65,7 +65,7 @@ cd ~/ros2_ws
 colcon build --packages-select polka
 
 # With CUDA support
-colcon build --packages-select polka --cmake-args -DPOLKA_ENABLE_CUDA=ON
+colcon build --packages-select polka --cmake-args -DWITH_CUDA=ON
 ```
 
 ## Quick Start
@@ -83,12 +83,36 @@ colcon build --packages-select polka --cmake-args -DPOLKA_ENABLE_CUDA=ON
 
 5. Launch:
    ```bash
-   ros2 launch polka polka.launch.py params_file:=config/my_robot.yaml
+   ros2 launch polka polka.launch.py config_file:=config/my_robot.yaml
    ```
 
 ## Configuration
 
 All parameters live under the `polka` namespace. See [config/example_params.yaml](config/example_params.yaml) for the full annotated reference.
+
+### Minimal Config
+
+```yaml
+polka:
+  ros__parameters:
+    output_frame_id: "base_link"
+    output_rate: 20.0
+    source_names: ["front_3d", "rear_2d"]
+    sources:
+      front_3d:
+        topic: "/front_lidar/points"
+        type: "pointcloud2"
+      rear_2d:
+        topic: "/rear_lidar/scan"
+        type: "laserscan"
+    outputs:
+      cloud:
+        enabled: true
+      scan:
+        enabled: true
+```
+
+Everything else has sensible defaults. Add filters, deskewing, and GPU acceleration as needed.
 
 ### Key Parameters
 
@@ -97,7 +121,18 @@ All parameters live under the `polka` namespace. See [config/example_params.yaml
 | `output_frame_id` | `"base_link"` | Target frame for all merged output |
 | `output_rate` | `20.0` | Merge + publish rate (Hz) |
 | `source_timeout` | `0.5` | Drop source if no data within this window (s) |
+| `enable_gpu` | `true` | Use CUDA merge engine when available (falls back to CPU) |
 | `timestamp_strategy` | `"earliest"` | Output stamp: `earliest`, `latest`, `average`, or `local` |
+
+### Per-Source Parameters
+
+| Parameter | Default | Description |
+|---|---|---|
+| `sources.<name>.topic` | `""` | Subscription topic (required) |
+| `sources.<name>.type` | `"pointcloud2"` | `"pointcloud2"` or `"laserscan"` |
+| `sources.<name>.imu_topic` | `""` | Per-source IMU override (empty = use global) |
+| `sources.<name>.qos_reliability` | `"best_effort"` | `"best_effort"` or `"reliable"` |
+| `sources.<name>.qos_history_depth` | `1` | QoS queue depth |
 
 ### Motion Compensation (IMU Deskewing)
 
@@ -143,14 +178,14 @@ Applied to the merged cloud before publishing, in this order:
 ```yaml
 outputs:
   cloud:
-    height_filter:
+    height_cap:
       enabled: true
       z_min: -1.0
       z_max: 3.0
     voxel:
       enabled: true
       leaf_size: 0.05
-    footprint_filter:
+    self_filter:
       enabled: true
       box_names: ["chassis"]
       chassis:
@@ -274,11 +309,13 @@ polka/
 │   ├── types.hpp                   # Config structs and type definitions
 │   ├── config_loader.hpp           # Parameter loading and hot-reload
 │   ├── source_adapter.hpp          # Subscribes to and converts sensor data
+│   ├── imu_buffer.hpp             # IMU ring buffer with atomic snapshot
+│   ├── se3_exp.hpp                # SE(3) exponential map for motion compensation
 │   ├── filters/
 │   │   ├── i_filter.hpp            # Filter interface
 │   │   ├── range_filter.hpp        # Min/max distance filter
 │   │   ├── angular_filter.hpp      # Angular sector filter
-│   │   └── box_filter.hpp          # Axis-aligned box filter (+ invert for footprint filter)
+│   │   └── box_filter.hpp          # Axis-aligned box filter (+ invert for self filter)
 │   └── merge_engine/
 │       ├── i_merge_engine.hpp      # Merge engine interface
 │       ├── cpu_merge_engine.hpp    # CPU merge implementation
@@ -289,6 +326,7 @@ polka/
     ├── polka_node.cpp              # Node implementation
     ├── config_loader.cpp           # Parameter loading logic
     ├── source_adapter.cpp          # Source subscription logic
+    ├── imu_buffer.cpp             # IMU buffer implementation
     ├── filters/                    # Filter implementations
     └── merge_engine/               # Merge engine implementations
 ```

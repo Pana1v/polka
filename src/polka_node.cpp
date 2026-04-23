@@ -421,6 +421,11 @@ void PolkaNode::imu_callback(sensor_msgs::msg::Imu::ConstSharedPtr msg)
       Eigen::Vector3d g_imu =
         ori.toRotationMatrix().transpose() * Eigen::Vector3d(0.0, 0.0, kGravity);
       accel -= g_imu;
+    } else {
+      accel.setZero();
+      RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 5000,
+        "motion compensation: degenerate IMU orientation quaternion, "
+        "translation deskew disabled");
     }
   } else {
     accel.setZero();

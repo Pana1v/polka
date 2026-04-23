@@ -86,11 +86,6 @@ bool SourceAdapter::validate_fields(const sensor_msgs::msg::PointCloud2 & msg)
     return false;
   }
   missing_intensity_ = !has_intensity;
-  if (missing_intensity_) {
-    RCLCPP_WARN(logger_,
-      "polka: source '%s' missing 'intensity' field - publishing with intensity=0",
-      config_.name.c_str());
-  }
   return true;
 }
 

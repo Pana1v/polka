@@ -81,6 +81,7 @@ private:
   laser_geometry::LaserProjection projector_;
   bool fields_validated_{false};
   bool fields_valid_{false};
+  bool missing_intensity_{false};
 
   std::vector<std::unique_ptr<IFilter>> filters_;
   bool gpu_filters_{false};

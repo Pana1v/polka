@@ -108,12 +108,28 @@ The motion model is inspired by [rko_lio](https://github.com/TixiaoShan/rko_lio)
 ```yaml
 motion_compensation:
   enabled: true
-  imu_topic: "/imu/data"          # sensor_msgs/Imu topic
+  imu_topic: "/imu/data"          # sensor_msgs/Imu topic (global, used by all sources)
   max_imu_age: 0.2                # seconds - reject stale IMU
   imu_buffer_size: 200            # ring buffer (~1s at 200Hz)
   per_point_deskew: true          # per-point correction within each scan
   deskew_timestamp_field: "auto"  # auto-detects 'time', 't', 'timestamp', etc.
 ```
+
+#### Per-Source IMU Override
+
+Articulated platforms (hinged vehicles, manipulators, humanoids) can override the IMU on a per-source basis. Each source uses TF to rotate its IMU's angular velocity into the sensor frame, so `robot_state_publisher` must keep the IMU-to-sensor transform current.
+
+```yaml
+sources:
+  front_3d:
+    topic: "/front_lidar/points"
+    imu_topic: "/front_lidar/imu"   # integrated IMU on front segment
+  rear_2d:
+    topic: "/rear_lidar/scan"
+    # imu_topic omitted — falls back to motion_compensation.imu_topic
+```
+
+The global `motion_compensation.imu_topic` remains the recommended path for rigid platforms.
 
 ### Output Filters
 

@@ -236,6 +236,7 @@ MergeConfig ConfigLoader::load()
     std::string p = "sources." + name;
 
     node_->declare_parameter<std::string>(p + ".topic", "");
+    node_->declare_parameter<std::string>(p + ".imu_topic", "");
     node_->declare_parameter<std::string>(p + ".type", "pointcloud2");
     node_->declare_parameter<std::string>(p + ".qos_reliability", "best_effort");
     node_->declare_parameter<int>(p + ".qos_history_depth", 1);
@@ -256,6 +257,7 @@ MergeConfig ConfigLoader::load()
     SourceConfig sc;
     sc.name = name;
     sc.topic = node_->get_parameter(p + ".topic").as_string();
+    sc.imu_topic = node_->get_parameter(p + ".imu_topic").as_string();
     auto type_str = node_->get_parameter(p + ".type").as_string();
     sc.type = (type_str == "laserscan") ? SourceType::LASERSCAN : SourceType::POINTCLOUD2;
     sc.qos_reliability = node_->get_parameter(p + ".qos_reliability").as_string();
@@ -297,6 +299,7 @@ MergeConfig ConfigLoader::reload(const std::vector<std::string> & source_names)
     SourceConfig sc;
     sc.name = name;
     sc.topic = node_->get_parameter(p + ".topic").as_string();
+    sc.imu_topic = node_->get_parameter(p + ".imu_topic").as_string();
     auto type_str = node_->get_parameter(p + ".type").as_string();
     sc.type = (type_str == "laserscan") ? SourceType::LASERSCAN : SourceType::POINTCLOUD2;
     sc.qos_reliability = node_->get_parameter(p + ".qos_reliability").as_string();

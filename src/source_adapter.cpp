@@ -194,9 +194,12 @@ void SourceAdapter::apply_filters(CloudT & cloud)
 
 void SourceAdapter::store_cloud(CloudT::Ptr cloud, const std_msgs::msg::Header & header)
 {
-  frame_id_ = header.frame_id;
+  {
+    std::lock_guard<std::mutex> lock(meta_mutex_);
+    frame_id_ = header.frame_id;
+    last_received_time_ = rclcpp::Time(header.stamp);
+  }
   std::atomic_store(&buffer_, std::static_pointer_cast<CloudT>(cloud));
-  last_received_time_ = rclcpp::Time(header.stamp);
   has_received_.store(true);
   message_counter_.fetch_add(1);
 }
@@ -257,14 +260,22 @@ CloudT::ConstPtr SourceAdapter::get_latest() const
   return std::atomic_load(&buffer_);
 }
 
+std::string SourceAdapter::frame_id() const
+{
+  std::lock_guard<std::mutex> lock(meta_mutex_);
+  return frame_id_;
+}
+
 bool SourceAdapter::is_stale(double timeout_sec, const rclcpp::Time & now) const
 {
   if (!has_received_.load()) return true;
+  std::lock_guard<std::mutex> lock(meta_mutex_);
   return (now - last_received_time_).seconds() > timeout_sec;
 }
 
 rclcpp::Time SourceAdapter::last_stamp() const
 {
+  std::lock_guard<std::mutex> lock(meta_mutex_);
   return last_received_time_;
 }
 

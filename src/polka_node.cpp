@@ -290,7 +290,11 @@ void PolkaNode::output_callback()
               imu_to_source_rotations_[sd.source_index] =
                 tf2::transformToEigen(tf_msg.transform).rotation();
               imu_to_source_cached_[sd.source_index] = true;
-            } catch (const tf2::TransformException &) {}
+            } catch (const tf2::TransformException & ex) {
+              RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 5000,
+                "IMU('%s') -> source('%s') TF not yet available: %s",
+                imu_frame_id_.c_str(), sd.frame_id.c_str(), ex.what());
+            }
           }
         }
 

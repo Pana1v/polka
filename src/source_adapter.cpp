@@ -21,6 +21,7 @@
 
 #include <pcl_conversions/pcl_conversions.h>
 #include <sensor_msgs/msg/point_field.hpp>
+#include <tf2_eigen/tf2_eigen.hpp>
 
 #include <cstring>
 
@@ -28,10 +29,13 @@ namespace polka {
 
 SourceAdapter::SourceAdapter(rclcpp::Node * node, const SourceConfig & config, bool gpu_filters,
                              ImuGetter imu_getter, bool deskew_enabled,
-                             const std::string & timestamp_field_hint)
+                             const std::string & timestamp_field_hint,
+                             std::shared_ptr<tf2_ros::Buffer> tf_buffer,
+                             const std::string & imu_frame_id)
 : node_(node), config_(config), logger_(node->get_logger()), gpu_filters_(gpu_filters),
   get_imu_(std::move(imu_getter)), deskew_enabled_(deskew_enabled),
-  timestamp_field_hint_(timestamp_field_hint)
+  timestamp_field_hint_(timestamp_field_hint),
+  tf_buffer_(std::move(tf_buffer)), imu_frame_id_(imu_frame_id)
 {
   // Build QoS
   rclcpp::QoS qos(config.qos_history_depth);
@@ -148,8 +152,15 @@ void SourceAdapter::deskew_cloud(
   size_t n = cloud.size();
   if (n == 0 || n != static_cast<size_t>(raw_msg.width) * raw_msg.height) return;
 
-  const Eigen::Vector3d angular_vel = imu.angular_vel;
-  const Eigen::Vector3d accel = imu.linear_accel;
+  cache_imu_rotation();
+
+  Eigen::Vector3d angular_vel = imu.angular_vel;
+  Eigen::Vector3d accel = imu.linear_accel;
+  if (imu_rotation_cached_) {
+    angular_vel = R_imu_to_sensor_ * angular_vel;
+    accel = R_imu_to_sensor_ * accel;
+  }
+
   const double header_sec = rclcpp::Time(raw_msg.header.stamp).seconds();
 
   const uint8_t * raw_data = raw_msg.data.data();
@@ -247,6 +258,40 @@ bool SourceAdapter::is_stale(double timeout_sec, const rclcpp::Time & now) const
 rclcpp::Time SourceAdapter::last_stamp() const
 {
   return last_received_time_;
+}
+
+void SourceAdapter::set_imu_frame_id(const std::string & frame_id)
+{
+  if (imu_frame_id_.empty() && !frame_id.empty()) {
+    imu_frame_id_ = frame_id;
+    imu_rotation_cached_ = false;
+  }
+}
+
+void SourceAdapter::cache_imu_rotation()
+{
+  if (imu_rotation_cached_ || imu_frame_id_.empty() || frame_id_.empty() || !tf_buffer_)
+    return;
+
+  if (imu_frame_id_ == frame_id_) {
+    R_imu_to_sensor_ = Eigen::Matrix3d::Identity();
+    imu_rotation_cached_ = true;
+    RCLCPP_INFO(logger_, "polka: source '%s' IMU frame == sensor frame ('%s'), no rotation needed",
+      config_.name.c_str(), frame_id_.c_str());
+    return;
+  }
+
+  try {
+    auto tf_msg = tf_buffer_->lookupTransform(frame_id_, imu_frame_id_, tf2::TimePointZero);
+    R_imu_to_sensor_ = tf2::transformToEigen(tf_msg.transform).rotation();
+    imu_rotation_cached_ = true;
+    RCLCPP_INFO(logger_, "polka: source '%s' cached IMU('%s') -> sensor('%s') rotation",
+      config_.name.c_str(), imu_frame_id_.c_str(), frame_id_.c_str());
+  } catch (const tf2::TransformException & ex) {
+    RCLCPP_WARN_THROTTLE(logger_, *node_->get_clock(), 5000,
+      "polka: source '%s' IMU('%s') -> sensor('%s') TF not yet available: %s",
+      config_.name.c_str(), imu_frame_id_.c_str(), frame_id_.c_str(), ex.what());
+  }
 }
 
 void SourceAdapter::rebuild_filters(const FilterParams & fp)

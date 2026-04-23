@@ -151,7 +151,7 @@ FilterParams ConfigLoader::load_filter_params(const std::string & prefix)
   return fp;
 }
 
-MergeConfig ConfigLoader::load()
+MergeConfig ConfigLoader::read_common_params()
 {
   MergeConfig cfg;
   cfg.output_frame_id = node_->get_parameter("output_frame_id").as_string();
@@ -167,7 +167,6 @@ MergeConfig ConfigLoader::load()
   else if (ts_str == "local") cfg.timestamp_strategy = TimestampStrategy::LOCAL;
   else throw std::runtime_error("polka: invalid timestamp_strategy '" + ts_str + "'");
 
-  // Motion compensation (IMU-based deskewing)
   cfg.motion_compensation.enabled =
     node_->get_parameter("motion_compensation.enabled").as_bool();
   cfg.motion_compensation.imu_topic =
@@ -183,13 +182,11 @@ MergeConfig ConfigLoader::load()
   cfg.motion_compensation.imu_frame =
     node_->get_parameter("motion_compensation.imu_frame").as_string();
 
-  // Cloud output
   cfg.cloud_output.enabled = node_->get_parameter("outputs.cloud.enabled").as_bool();
   cfg.cloud_output.topic = node_->get_parameter("outputs.cloud.topic").as_string();
   cfg.cloud_output.qos = load_output_qos("outputs.cloud.qos");
   cfg.cloud_output.filters = load_filter_params("outputs.cloud.filters");
 
-  // Voxel config
   {
     double uniform = node_->get_parameter("outputs.cloud.voxel.leaf_size").as_double();
     double lx = node_->get_parameter("outputs.cloud.voxel.leaf_x").as_double();
@@ -205,7 +202,6 @@ MergeConfig ConfigLoader::load()
       (lx > 0.0 && ly > 0.0 && lz > 0.0);
   }
 
-  // Height cap config
   cfg.cloud_output.height_cap.enabled =
     node_->get_parameter("outputs.cloud.height_cap.enabled").as_bool();
   cfg.cloud_output.height_cap.z_min =
@@ -213,10 +209,6 @@ MergeConfig ConfigLoader::load()
   cfg.cloud_output.height_cap.z_max =
     node_->get_parameter("outputs.cloud.height_cap.z_max").as_double();
 
-  // Self-filter config
-  cfg.cloud_output.self_filter = load_self_filter_config("outputs.cloud.self_filter");
-
-  // Scan output
   cfg.scan_output.enabled = node_->get_parameter("outputs.scan.enabled").as_bool();
   cfg.scan_output.topic = node_->get_parameter("outputs.scan.topic").as_string();
   cfg.scan_output.qos = load_output_qos("outputs.scan.qos");
@@ -230,7 +222,15 @@ MergeConfig ConfigLoader::load()
   cfg.scan_output.flatten.compute_bins();
   cfg.scan_output.flatten.validate();
 
-  // Sources
+  return cfg;
+}
+
+MergeConfig ConfigLoader::load()
+{
+  MergeConfig cfg = read_common_params();
+
+  cfg.cloud_output.self_filter = load_self_filter_config("outputs.cloud.self_filter");
+
   auto source_names = node_->get_parameter("source_names").as_string_array();
   for (const auto & name : source_names) {
     std::string p = "sources." + name;
@@ -272,66 +272,8 @@ MergeConfig ConfigLoader::load()
 
 MergeConfig ConfigLoader::reload(const std::vector<std::string> & source_names)
 {
-  MergeConfig cfg;
-  cfg.output_frame_id = node_->get_parameter("output_frame_id").as_string();
-  cfg.output_rate = node_->get_parameter("output_rate").as_double();
-  cfg.source_timeout = node_->get_parameter("source_timeout").as_double();
-  cfg.enable_gpu = node_->get_parameter("enable_gpu").as_bool();
-  cfg.max_source_spread_warn = node_->get_parameter("max_source_spread_warn").as_double();
+  MergeConfig cfg = read_common_params();
 
-  auto ts_str = node_->get_parameter("timestamp_strategy").as_string();
-  if (ts_str == "earliest") cfg.timestamp_strategy = TimestampStrategy::EARLIEST;
-  else if (ts_str == "latest") cfg.timestamp_strategy = TimestampStrategy::LATEST;
-  else if (ts_str == "average") cfg.timestamp_strategy = TimestampStrategy::AVERAGE;
-  else if (ts_str == "local") cfg.timestamp_strategy = TimestampStrategy::LOCAL;
-  else throw std::runtime_error("polka: invalid timestamp_strategy '" + ts_str + "'");
-
-  // Motion compensation (IMU-based deskewing)
-  cfg.motion_compensation.enabled =
-    node_->get_parameter("motion_compensation.enabled").as_bool();
-  cfg.motion_compensation.imu_topic =
-    node_->get_parameter("motion_compensation.imu_topic").as_string();
-  cfg.motion_compensation.max_imu_age =
-    node_->get_parameter("motion_compensation.max_imu_age").as_double();
-  cfg.motion_compensation.imu_buffer_size =
-    node_->get_parameter("motion_compensation.imu_buffer_size").as_int();
-  cfg.motion_compensation.per_point_deskew =
-    node_->get_parameter("motion_compensation.per_point_deskew").as_bool();
-  cfg.motion_compensation.deskew_timestamp_field =
-    node_->get_parameter("motion_compensation.deskew_timestamp_field").as_string();
-  cfg.motion_compensation.imu_frame =
-    node_->get_parameter("motion_compensation.imu_frame").as_string();
-
-  cfg.cloud_output.enabled = node_->get_parameter("outputs.cloud.enabled").as_bool();
-  cfg.cloud_output.topic = node_->get_parameter("outputs.cloud.topic").as_string();
-  cfg.cloud_output.qos = load_output_qos("outputs.cloud.qos");
-  cfg.cloud_output.filters = load_filter_params("outputs.cloud.filters");
-
-  // Voxel config
-  {
-    double uniform = node_->get_parameter("outputs.cloud.voxel.leaf_size").as_double();
-    double lx = node_->get_parameter("outputs.cloud.voxel.leaf_x").as_double();
-    double ly = node_->get_parameter("outputs.cloud.voxel.leaf_y").as_double();
-    double lz = node_->get_parameter("outputs.cloud.voxel.leaf_z").as_double();
-    if (uniform > 0.0 && lx == 0.0 && ly == 0.0 && lz == 0.0)
-      lx = ly = lz = uniform;
-    cfg.cloud_output.voxel.leaf_x = static_cast<float>(lx);
-    cfg.cloud_output.voxel.leaf_y = static_cast<float>(ly);
-    cfg.cloud_output.voxel.leaf_z = static_cast<float>(lz);
-    cfg.cloud_output.voxel.enabled =
-      node_->get_parameter("outputs.cloud.voxel.enabled").as_bool() ||
-      (lx > 0.0 && ly > 0.0 && lz > 0.0);
-  }
-
-  // Height cap config
-  cfg.cloud_output.height_cap.enabled =
-    node_->get_parameter("outputs.cloud.height_cap.enabled").as_bool();
-  cfg.cloud_output.height_cap.z_min =
-    node_->get_parameter("outputs.cloud.height_cap.z_min").as_double();
-  cfg.cloud_output.height_cap.z_max =
-    node_->get_parameter("outputs.cloud.height_cap.z_max").as_double();
-
-  // Self-filter config (box params already declared in load())
   cfg.cloud_output.self_filter.enabled =
     node_->get_parameter("outputs.cloud.self_filter.enabled").as_bool();
   if (cfg.cloud_output.self_filter.enabled) {
@@ -349,19 +291,6 @@ MergeConfig ConfigLoader::reload(const std::vector<std::string> & source_names)
       cfg.cloud_output.self_filter.boxes.push_back(box);
     }
   }
-
-  cfg.scan_output.enabled = node_->get_parameter("outputs.scan.enabled").as_bool();
-  cfg.scan_output.topic = node_->get_parameter("outputs.scan.topic").as_string();
-  cfg.scan_output.qos = load_output_qos("outputs.scan.qos");
-  cfg.scan_output.flatten.z_min = node_->get_parameter("outputs.scan.z_min").as_double();
-  cfg.scan_output.flatten.z_max = node_->get_parameter("outputs.scan.z_max").as_double();
-  cfg.scan_output.flatten.angle_min = node_->get_parameter("outputs.scan.angle_min").as_double();
-  cfg.scan_output.flatten.angle_max = node_->get_parameter("outputs.scan.angle_max").as_double();
-  cfg.scan_output.flatten.angle_increment = node_->get_parameter("outputs.scan.angle_increment").as_double();
-  cfg.scan_output.flatten.range_min = node_->get_parameter("outputs.scan.range_min").as_double();
-  cfg.scan_output.flatten.range_max = node_->get_parameter("outputs.scan.range_max").as_double();
-  cfg.scan_output.flatten.compute_bins();
-  cfg.scan_output.flatten.validate();
 
   for (const auto & name : source_names) {
     std::string p = "sources." + name;

@@ -224,19 +224,18 @@ void PolkaNode::output_callback()
   if (!has_fresh_data) {
     std::lock_guard<std::mutex> lock(last_data_mutex_);
     if (last_cloud_ && !last_cloud_->empty()) {
-      rclcpp::Time stale_stamp = now;
       if (cloud_pub_) {
         sensor_msgs::msg::PointCloud2 msg;
         pcl::toROSMsg(*last_cloud_, msg);
         msg.header.frame_id = config_.output_frame_id;
-        msg.header.stamp = stale_stamp;
+        msg.header.stamp = last_cloud_stamp_;
         cloud_pub_->publish(msg);
       }
       if (scan_pub_) {
         if (!last_scan_ranges_.empty())
-          publish_scan_from_ranges(last_scan_ranges_, stale_stamp);
+          publish_scan_from_ranges(last_scan_ranges_, last_cloud_stamp_);
         else
-          publish_scan(last_cloud_, stale_stamp);
+          publish_scan(last_cloud_, last_cloud_stamp_);
       }
       return;
     } else {
@@ -493,44 +492,6 @@ void PolkaNode::imu_callback(sensor_msgs::msg::Imu::ConstSharedPtr msg)
   avg->linear_accel = accel;
   avg->valid = true;
   std::atomic_store(&imu_snapshot_, std::const_pointer_cast<const AveragedImu>(avg));
-}
-
-AveragedImu PolkaNode::average_imu(
-  const rclcpp::Time & start, const rclcpp::Time & end) const
-{
-  AveragedImu result;
-  std::lock_guard<std::mutex> lock(imu_mutex_);
-
-  if (imu_buffer_.empty()) return result;
-
-  Eigen::Vector3d sum_w = Eigen::Vector3d::Zero();
-  Eigen::Vector3d sum_a = Eigen::Vector3d::Zero();
-  int count = 0;
-
-  for (const auto & s : imu_buffer_) {
-    if (s.stamp >= start && s.stamp <= end) {
-      sum_w += Eigen::Vector3d(s.wx, s.wy, s.wz);
-      sum_a += Eigen::Vector3d(s.ax, s.ay, s.az);
-      ++count;
-    }
-  }
-
-  if (count > 0) {
-    result.angular_vel = sum_w / count;
-    result.linear_accel = sum_a / count;
-    result.valid = true;
-  } else if (!imu_buffer_.empty()) {
-    // No samples in range — use the most recent sample
-    double age = (this->now() - imu_buffer_.back().stamp).seconds();
-    if (age <= config_.motion_compensation.max_imu_age) {
-      const auto & s = imu_buffer_.back();
-      result.angular_vel = Eigen::Vector3d(s.wx, s.wy, s.wz);
-      result.linear_accel = Eigen::Vector3d(s.ax, s.ay, s.az);
-      result.valid = true;
-    }
-  }
-
-  return result;
 }
 
 PipelineConfig PolkaNode::build_pipeline_config() const

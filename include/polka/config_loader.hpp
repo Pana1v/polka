@@ -31,6 +31,7 @@ private:
   rclcpp::Logger logger_;
 
   void declare_defaults();
+  MergeConfig read_common_params();
   FilterParams load_filter_params(const std::string & prefix);
   OutputQosConfig load_output_qos(const std::string & prefix);
   SelfFilterConfig load_self_filter_config(const std::string & prefix);

@@ -27,6 +27,7 @@
 #include <Eigen/Core>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <vector>
 #include <atomic>
@@ -49,7 +50,7 @@ public:
   bool is_stale(double timeout_sec, const rclcpp::Time & now) const;
   rclcpp::Time last_stamp() const;
   std::string name() const { return config_.name; }
-  std::string frame_id() const { return frame_id_; }
+  std::string frame_id() const;
   uint64_t message_count() const { return message_counter_.load(); }
   const FilterParams & filter_params() const { return config_.filter_params; }
   void rebuild_filters(const FilterParams & fp);
@@ -77,6 +78,7 @@ private:
   rclcpp::Subscription<sensor_msgs::msg::LaserScan>::SharedPtr scan_sub_;
 
   std::shared_ptr<CloudT> buffer_;
+  mutable std::mutex meta_mutex_;
   rclcpp::Time last_received_time_;
   std::string frame_id_;
 

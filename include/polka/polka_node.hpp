@@ -68,7 +68,6 @@ private:
   // IMU-based motion compensation
   void setup_imu_subscriber();
   void imu_callback(sensor_msgs::msg::Imu::ConstSharedPtr msg);
-  AveragedImu average_imu(const rclcpp::Time & start, const rclcpp::Time & end) const;
 
   MergeConfig config_;
 

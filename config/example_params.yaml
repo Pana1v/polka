@@ -26,7 +26,7 @@ polka:
     output_rate: 20.0                # Hz - merged output publish rate
     source_timeout: 0.5              # seconds - drop source if no data within this window
     enable_gpu: true                 # use CUDA GPU pipeline when available (falls back to CPU)
-    timestamp_strategy: "latest"     # "earliest" | "latest" | "average" | "local"
+    timestamp_strategy: "earliest"   # "earliest" | "latest" | "average" | "local"
     max_source_spread_warn: 0.05     # seconds - warn if source timestamps differ by more
 
     # --------------------------------------------------
@@ -227,3 +227,51 @@ polka:
             # y_max:  3.0
             # z_min: -1.0
             # z_max:  2.0
+
+# ============================================================================
+# Alternate example: articulated platform with per-source IMU deskewing
+# ----------------------------------------------------------------------------
+# Use this layout when one LiDAR moves relative to the rest of the robot
+# (rotating turret, actuated mast, pan-tilt head, hinged trailer, etc.).
+# Each moving sensor needs its own IMU rigidly bolted to the moving body;
+# fixed sensors share the platform IMU via motion_compensation.imu_topic.
+#
+# TF requirement: robot_state_publisher must publish a live transform from
+# each IMU frame to its sensor frame (dynamic is fine - e.g. from a joint
+# state publisher reading the turret encoder). polka uses that transform
+# to rotate angular velocity and linear acceleration into the sensor frame
+# before deskewing.
+# ============================================================================
+#
+# polka:
+#   ros__parameters:
+#     output_frame_id: "base_link"
+#     output_rate: 20.0
+#     timestamp_strategy: "latest"
+#
+#     motion_compensation:
+#       enabled: true
+#       imu_topic: "/imu/data"          # global / fallback IMU (chassis)
+#       imu_frame: ""                   # empty => use msg.header.frame_id
+#       max_imu_age: 0.2
+#       imu_buffer_size: 200
+#       per_point_deskew: true
+#       deskew_timestamp_field: "auto"  # auto-detects time/t/timestamp/...
+#
+#     source_names: ["turret_lidar", "chassis_lidar"]
+#
+#     sources:
+#       # Rotating turret: uses its OWN IMU (bolted to the turret body).
+#       turret_lidar:
+#         topic: "/turret/points"
+#         type: "pointcloud2"
+#         imu_topic: "/turret/imu/data" # per-source override
+#         qos_reliability: "best_effort"
+#         qos_history_depth: 1
+#
+#       # Fixed chassis LiDAR: no override => uses global /imu/data.
+#       chassis_lidar:
+#         topic: "/chassis/points"
+#         type: "pointcloud2"
+#         qos_reliability: "best_effort"
+#         qos_history_depth: 1

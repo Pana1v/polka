@@ -88,6 +88,10 @@ private:
   std::vector<Eigen::Isometry3d> last_good_transforms_;
   std::vector<int> tf_fail_counts_;
 
+  // IMU→source frame rotation cache (for inter-source alignment)
+  std::vector<Eigen::Matrix3d> imu_to_source_rotations_;
+  std::vector<bool> imu_to_source_cached_;
+
   // Runtime reconfiguration
   ConfigLoader config_loader_;
   std::vector<std::string> source_names_;
@@ -98,6 +102,7 @@ private:
   std::deque<ImuSample> imu_buffer_;
   mutable std::mutex imu_mutex_;
   std::shared_ptr<const AveragedImu> imu_snapshot_;  // atomic-shared with SourceAdapters
+  std::string imu_frame_id_;
 
   // Stale data buffering - ensures publishing at specified frequency
   CloudT::Ptr last_cloud_;

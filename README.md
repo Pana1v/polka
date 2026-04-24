@@ -152,19 +152,27 @@ motion_compensation:
 
 #### Per-Source IMU Override
 
-Articulated platforms (hinged vehicles, manipulators, humanoids) can override the IMU on a per-source basis. Each source uses TF to rotate its IMU's angular velocity into the sensor frame, so `robot_state_publisher` must keep the IMU-to-sensor transform current.
+Articulated platforms (hinged vehicles, manipulators, humanoids, rotating turrets) can override the IMU on a per-source basis: each moving sensor reads an IMU rigidly mounted to the moving body, while fixed sensors share the global platform IMU. polka uses TF to rotate both angular velocity and linear acceleration from the IMU frame into each sensor's frame, so `robot_state_publisher` must keep the IMU→sensor transform current — a dynamic transform (e.g. driven by joint_states from a turret encoder) works out of the box.
 
 ```yaml
+motion_compensation:
+  enabled: true
+  imu_topic: "/imu/data"          # global fallback IMU
+
 sources:
-  front_3d:
-    topic: "/front_lidar/points"
-    imu_topic: "/front_lidar/imu"   # integrated IMU on front segment
-  rear_2d:
-    topic: "/rear_lidar/scan"
-    # imu_topic omitted — falls back to motion_compensation.imu_topic
+  turret_lidar:
+    topic: "/turret/points"
+    imu_topic: "/turret/imu/data" # per-source override
+  chassis_lidar:
+    topic: "/chassis/points"
+    # imu_topic omitted — falls back to /imu/data
 ```
 
-The global `motion_compensation.imu_topic` remains the recommended path for rigid platforms.
+A working snippet with two sources is appended to [`config/example_params.yaml`](config/example_params.yaml) ("articulated platform" block). The global `motion_compensation.imu_topic` remains the recommended path for fully rigid platforms.
+
+**Per-point timestamp auto-detect.** With `deskew_timestamp_field: "auto"` polka scans each `PointCloud2` for one of: `time`, `t`, `timestamp`, `time_stamp`, `offset_time`, `timeStamp`. Set a specific name if your driver uses something else; if no usable field is present polka logs once and falls back to whole-scan (non-per-point) deskewing for that source.
+
+**Gravity subtraction.** Gravity is subtracted from `linear_acceleration` only when the IMU publishes a valid orientation: `orientation_covariance[0] >= 0` and a non-degenerate quaternion. Otherwise acceleration is zeroed and deskewing is rotation-only — still useful, but translation during the scan is not corrected.
 
 ### Output Filters
 

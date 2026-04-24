@@ -453,9 +453,27 @@ void PolkaNode::imu_callback(sensor_msgs::msg::Imu::ConstSharedPtr msg)
     return;
   }
 
+  Eigen::Vector3d accel(a.x, a.y, a.z);
+  if (msg->orientation_covariance[0] >= 0.0) {
+    const auto & q = msg->orientation;
+    Eigen::Quaterniond ori(q.w, q.x, q.y, q.z);
+    if (ori.squaredNorm() > 0.5) {
+      ori.normalize();
+      constexpr double kGravity = 9.80665;
+      Eigen::Vector3d g_imu =
+        ori.toRotationMatrix().transpose() * Eigen::Vector3d(0.0, 0.0, kGravity);
+      accel -= g_imu;
+    }
+  } else {
+    accel.setZero();
+    RCLCPP_WARN_ONCE(get_logger(),
+      "motion compensation: IMU has no orientation — "
+      "cannot subtract gravity, translation deskew disabled (rotation-only)");
+  }
+
   ImuSample sample;
   sample.wx = w.x;  sample.wy = w.y;  sample.wz = w.z;
-  sample.ax = a.x;  sample.ay = a.y;  sample.az = a.z;
+  sample.ax = accel.x();  sample.ay = accel.y();  sample.az = accel.z();
   sample.stamp = rclcpp::Time(msg->header.stamp);
 
   {
@@ -465,12 +483,9 @@ void PolkaNode::imu_callback(sensor_msgs::msg::Imu::ConstSharedPtr msg)
       imu_buffer_.pop_front();
   }
 
-  // Update the atomic snapshot with the latest single-sample average
-  // (SourceAdapters use this as a best-effort fallback when the full
-  //  average_imu() isn't called from the output_callback path)
   auto avg = std::make_shared<AveragedImu>();
   avg->angular_vel = Eigen::Vector3d(w.x, w.y, w.z);
-  avg->linear_accel = Eigen::Vector3d(a.x, a.y, a.z);
+  avg->linear_accel = accel;
   avg->valid = true;
   std::atomic_store(&imu_snapshot_, std::const_pointer_cast<const AveragedImu>(avg));
 }

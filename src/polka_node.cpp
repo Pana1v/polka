@@ -54,7 +54,7 @@ rclcpp::QoS build_qos(const OutputQosConfig & cfg)
   else
     qos.durability(rclcpp::DurabilityPolicy::Volatile);
 
-  if (cfg.liveliness == "manual_by_topic")
+  if (cfg.liveliness == "manual_by_topic" || cfg.liveliness == "manual_by_node")
     qos.liveliness(rclcpp::LivelinessPolicy::ManualByTopic);
   else
     qos.liveliness(rclcpp::LivelinessPolicy::Automatic);
@@ -104,6 +104,8 @@ PolkaNode::PolkaNode(const rclcpp::NodeOptions & options)
   if (config_.motion_compensation.enabled)
     setup_imu_subscriber();
 
+  imu_frame_id_ = config_.motion_compensation.imu_frame;
+
   // IMU getter for source adapters (per-point deskewing)
   SourceAdapter::ImuGetter imu_getter = nullptr;
   if (config_.motion_compensation.enabled && config_.motion_compensation.per_point_deskew) {
@@ -117,10 +119,14 @@ PolkaNode::PolkaNode(const rclcpp::NodeOptions & options)
     sources_.push_back(std::make_unique<SourceAdapter>(
       this, src_cfg, gpu_filters, imu_getter,
       config_.motion_compensation.enabled && config_.motion_compensation.per_point_deskew,
-      config_.motion_compensation.deskew_timestamp_field));
+      config_.motion_compensation.deskew_timestamp_field,
+      config_.motion_compensation.enabled ? tf_buffer_ : nullptr,
+      imu_frame_id_));
 
   last_good_transforms_.resize(sources_.size(), Eigen::Isometry3d::Identity());
   tf_fail_counts_.resize(sources_.size(), 0);
+  imu_to_source_rotations_.resize(sources_.size(), Eigen::Matrix3d::Identity());
+  imu_to_source_cached_.resize(sources_.size(), false);
 
   build_output_filters();
 
@@ -178,6 +184,8 @@ void PolkaNode::output_callback()
     Eigen::Isometry3d transform;
     FilterParams filter_params;
     rclcpp::Time stamp;
+    std::string frame_id;
+    size_t source_index;
   };
   std::vector<SourceData> source_data;
 
@@ -208,7 +216,8 @@ void PolkaNode::output_callback()
       transform = last_good_transforms_[i];
     }
 
-    source_data.push_back({cloud, transform, src->filter_params(), src->last_stamp()});
+    source_data.push_back({cloud, transform, src->filter_params(), src->last_stamp(),
+                           src->frame_id(), i});
   }
 
   bool has_fresh_data = !source_data.empty();
@@ -268,8 +277,33 @@ void PolkaNode::output_callback()
     if (do_compensate) {
       double dt = (sd.stamp - output_stamp).seconds();
       if (std::abs(dt) > 1e-6) {
-        Eigen::Isometry3d delta = compute_motion_delta(
-          imu_for_alignment.angular_vel, imu_for_alignment.linear_accel, dt);
+        Eigen::Vector3d w = imu_for_alignment.angular_vel;
+        Eigen::Vector3d a = imu_for_alignment.linear_accel;
+
+        if (!imu_to_source_cached_[sd.source_index] && !imu_frame_id_.empty()) {
+          if (imu_frame_id_ == sd.frame_id) {
+            imu_to_source_cached_[sd.source_index] = true;
+          } else {
+            try {
+              auto tf_msg = tf_buffer_->lookupTransform(
+                sd.frame_id, imu_frame_id_, tf2::TimePointZero);
+              imu_to_source_rotations_[sd.source_index] =
+                tf2::transformToEigen(tf_msg.transform).rotation();
+              imu_to_source_cached_[sd.source_index] = true;
+            } catch (const tf2::TransformException & ex) {
+              RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 5000,
+                "IMU('%s') -> source('%s') TF not yet available: %s",
+                imu_frame_id_.c_str(), sd.frame_id.c_str(), ex.what());
+            }
+          }
+        }
+
+        if (imu_to_source_cached_[sd.source_index]) {
+          w = imu_to_source_rotations_[sd.source_index] * w;
+          a = imu_to_source_rotations_[sd.source_index] * a;
+        }
+
+        Eigen::Isometry3d delta = compute_motion_delta(w, a, dt);
         final_transform = delta * sd.transform;
       }
     }
@@ -402,6 +436,14 @@ void PolkaNode::setup_imu_subscriber()
 
 void PolkaNode::imu_callback(sensor_msgs::msg::Imu::ConstSharedPtr msg)
 {
+  if (imu_frame_id_.empty() && !msg->header.frame_id.empty()) {
+    imu_frame_id_ = msg->header.frame_id;
+    RCLCPP_INFO(get_logger(), "motion compensation: auto-detected IMU frame '%s'",
+      imu_frame_id_.c_str());
+    for (auto & src : sources_)
+      src->set_imu_frame_id(imu_frame_id_);
+  }
+
   const auto & a = msg->linear_acceleration;
   const auto & w = msg->angular_velocity;
   if (!std::isfinite(a.x) || !std::isfinite(a.y) || !std::isfinite(a.z) ||

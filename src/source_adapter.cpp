@@ -13,7 +13,6 @@
 // limitations under the License.
 
 #include "polka/source_adapter.hpp"
-#include "polka/polka_node.hpp"  // for AveragedImu definition
 #include "polka/se3_exp.hpp"
 #include "polka/filters/range_filter.hpp"
 #include "polka/filters/angular_filter.hpp"
@@ -31,12 +30,20 @@ SourceAdapter::SourceAdapter(rclcpp::Node * node, const SourceConfig & config, b
                              ImuGetter imu_getter, bool deskew_enabled,
                              const std::string & timestamp_field_hint,
                              std::shared_ptr<tf2_ros::Buffer> tf_buffer,
-                             const std::string & imu_frame_id)
+                             int imu_buffer_size)
 : node_(node), config_(config), logger_(node->get_logger()), gpu_filters_(gpu_filters),
   get_imu_(std::move(imu_getter)), deskew_enabled_(deskew_enabled),
-  timestamp_field_hint_(timestamp_field_hint),
-  tf_buffer_(std::move(tf_buffer)), imu_frame_id_(imu_frame_id)
+  timestamp_field_hint_(timestamp_field_hint), tf_buffer_(std::move(tf_buffer))
 {
+  // Per-source IMU: if configured, create a local buffer and override the getter
+  if (deskew_enabled_ && !config.imu_topic.empty()) {
+    local_imu_ = std::make_shared<ImuBuffer>(node, config.imu_topic, imu_buffer_size);
+    get_imu_ = [this]() -> std::shared_ptr<const AveragedImu> {
+      return local_imu_->snapshot();
+    };
+    RCLCPP_INFO(logger_, "polka: source '%s' using per-source IMU on '%s'",
+      config.name.c_str(), config.imu_topic.c_str());
+  }
   // Build QoS
   rclcpp::QoS qos(config.qos_history_depth);
   if (config.qos_reliability == "best_effort") {
@@ -154,15 +161,24 @@ void SourceAdapter::deskew_cloud(
   size_t n = cloud.size();
   if (n == 0 || n != static_cast<size_t>(raw_msg.width) * raw_msg.height) return;
 
-  cache_imu_rotation();
-
-  Eigen::Vector3d angular_vel = imu.angular_vel;
-  Eigen::Vector3d accel = imu.linear_accel;
-  if (imu_rotation_cached_) {
-    angular_vel = R_imu_to_sensor_ * angular_vel;
-    accel = R_imu_to_sensor_ * accel;
+  // Rotate IMU data from IMU frame into sensor frame (identity if same frame or TF unavailable)
+  Eigen::Matrix3d R_imu_to_sensor = Eigen::Matrix3d::Identity();
+  if (tf_buffer_ && !imu.frame_id.empty()) {
+    std::string sensor_frame;
+    { std::lock_guard<std::mutex> lock(meta_mutex_); sensor_frame = frame_id_; }
+    if (!sensor_frame.empty() && sensor_frame != imu.frame_id) {
+      try {
+        auto tf_msg = tf_buffer_->lookupTransform(
+          sensor_frame, imu.frame_id, tf2::TimePointZero);
+        R_imu_to_sensor = tf2::transformToEigen(tf_msg.transform).rotation();
+      } catch (const tf2::TransformException &) {
+        // Identity fallback — same behavior as before TF rotation was added
+      }
+    }
   }
 
+  const Eigen::Vector3d angular_vel = R_imu_to_sensor * imu.angular_vel;
+  const Eigen::Vector3d accel = R_imu_to_sensor * imu.linear_accel;
   const double header_sec = rclcpp::Time(raw_msg.header.stamp).seconds();
 
   const uint8_t * raw_data = raw_msg.data.data();
@@ -194,9 +210,12 @@ void SourceAdapter::apply_filters(CloudT & cloud)
 
 void SourceAdapter::store_cloud(CloudT::Ptr cloud, const std_msgs::msg::Header & header)
 {
-  frame_id_ = header.frame_id;
+  {
+    std::lock_guard<std::mutex> lock(meta_mutex_);
+    frame_id_ = header.frame_id;
+    last_received_time_ = rclcpp::Time(header.stamp);
+  }
   std::atomic_store(&buffer_, std::static_pointer_cast<CloudT>(cloud));
-  last_received_time_ = rclcpp::Time(header.stamp);
   has_received_.store(true);
   message_counter_.fetch_add(1);
 }
@@ -257,49 +276,23 @@ CloudT::ConstPtr SourceAdapter::get_latest() const
   return std::atomic_load(&buffer_);
 }
 
+std::string SourceAdapter::frame_id() const
+{
+  std::lock_guard<std::mutex> lock(meta_mutex_);
+  return frame_id_;
+}
+
 bool SourceAdapter::is_stale(double timeout_sec, const rclcpp::Time & now) const
 {
   if (!has_received_.load()) return true;
+  std::lock_guard<std::mutex> lock(meta_mutex_);
   return (now - last_received_time_).seconds() > timeout_sec;
 }
 
 rclcpp::Time SourceAdapter::last_stamp() const
 {
+  std::lock_guard<std::mutex> lock(meta_mutex_);
   return last_received_time_;
-}
-
-void SourceAdapter::set_imu_frame_id(const std::string & frame_id)
-{
-  if (imu_frame_id_.empty() && !frame_id.empty()) {
-    imu_frame_id_ = frame_id;
-    imu_rotation_cached_ = false;
-  }
-}
-
-void SourceAdapter::cache_imu_rotation()
-{
-  if (imu_rotation_cached_ || imu_frame_id_.empty() || frame_id_.empty() || !tf_buffer_)
-    return;
-
-  if (imu_frame_id_ == frame_id_) {
-    R_imu_to_sensor_ = Eigen::Matrix3d::Identity();
-    imu_rotation_cached_ = true;
-    RCLCPP_INFO(logger_, "polka: source '%s' IMU frame == sensor frame ('%s'), no rotation needed",
-      config_.name.c_str(), frame_id_.c_str());
-    return;
-  }
-
-  try {
-    auto tf_msg = tf_buffer_->lookupTransform(frame_id_, imu_frame_id_, tf2::TimePointZero);
-    R_imu_to_sensor_ = tf2::transformToEigen(tf_msg.transform).rotation();
-    imu_rotation_cached_ = true;
-    RCLCPP_INFO(logger_, "polka: source '%s' cached IMU('%s') -> sensor('%s') rotation",
-      config_.name.c_str(), imu_frame_id_.c_str(), frame_id_.c_str());
-  } catch (const tf2::TransformException & ex) {
-    RCLCPP_WARN_THROTTLE(logger_, *node_->get_clock(), 5000,
-      "polka: source '%s' IMU('%s') -> sensor('%s') TF not yet available: %s",
-      config_.name.c_str(), imu_frame_id_.c_str(), frame_id_.c_str(), ex.what());
-  }
 }
 
 void SourceAdapter::rebuild_filters(const FilterParams & fp)

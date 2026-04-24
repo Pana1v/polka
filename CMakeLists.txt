@@ -46,6 +46,7 @@ include_directories(include ${PCL_INCLUDE_DIRS} ${EIGEN3_INCLUDE_DIRS})
 
 set(POLKA_CORE_SOURCES
   src/config_loader.cpp
+  src/imu_buffer.cpp
   src/filters/range_filter.cpp
   src/filters/angular_filter.cpp
   src/filters/box_filter.cpp

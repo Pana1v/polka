@@ -180,6 +180,9 @@ polka:
       front_3d:
         topic: "/front_lidar/points"
         type: "pointcloud2"
+        # imu_topic: "/front_lidar/imu" # per-source IMU override (empty or omitted = use global)
+                                        # useful for articulated platforms where each LiDAR
+                                        # has its own IMU; global IMU recommended for rigid platforms
         qos_reliability: "best_effort"   # "best_effort" or "reliable"
         qos_history_depth: 1
         filters:
@@ -201,6 +204,7 @@ polka:
       rear_2d:
         topic: "/rear_lidar/scan"
         type: "laserscan"
+        # imu_topic: ""                  # falls back to motion_compensation.imu_topic
         qos_reliability: "best_effort"
         qos_history_depth: 1
         filters:

@@ -18,36 +18,23 @@
 #include "polka/types.hpp"
 #include "polka/config_loader.hpp"
 #include "polka/source_adapter.hpp"
+#include "polka/imu_buffer.hpp"
 #include "polka/merge_engine/i_merge_engine.hpp"
 #include "polka/filters/i_filter.hpp"
 
 #include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/msg/point_cloud2.hpp>
 #include <sensor_msgs/msg/laser_scan.hpp>
-#include <sensor_msgs/msg/imu.hpp>
 #include <tf2_ros/buffer.h>
 #include <tf2_ros/transform_listener.h>
 #include <Eigen/Geometry>
 
-#include <deque>
 #include <memory>
 #include <vector>
 #include <string>
 #include <mutex>
 
 namespace polka {
-
-struct ImuSample {
-  double wx = 0.0, wy = 0.0, wz = 0.0;   // angular velocity (rad/s)
-  double ax = 0.0, ay = 0.0, az = 0.0;    // linear acceleration (m/s²)
-  rclcpp::Time stamp{0, 0, RCL_ROS_TIME};
-};
-
-struct AveragedImu {
-  Eigen::Vector3d angular_vel = Eigen::Vector3d::Zero();
-  Eigen::Vector3d linear_accel = Eigen::Vector3d::Zero();
-  bool valid = false;
-};
 
 class PolkaNode : public rclcpp::Node {
 public:
@@ -65,10 +52,7 @@ private:
   void voxel_downsample(CloudT & cloud);
   void height_cap(CloudT & cloud);
 
-  // IMU-based motion compensation
-  void setup_imu_subscriber();
-  void imu_callback(sensor_msgs::msg::Imu::ConstSharedPtr msg);
-  AveragedImu average_imu(const rclcpp::Time & start, const rclcpp::Time & end) const;
+  // IMU-based motion compensation (global)
 
   MergeConfig config_;
 
@@ -88,21 +72,13 @@ private:
   std::vector<Eigen::Isometry3d> last_good_transforms_;
   std::vector<int> tf_fail_counts_;
 
-  // IMU→source frame rotation cache (for inter-source alignment)
-  std::vector<Eigen::Matrix3d> imu_to_source_rotations_;
-  std::vector<bool> imu_to_source_cached_;
-
   // Runtime reconfiguration
   ConfigLoader config_loader_;
   std::vector<std::string> source_names_;
   rclcpp::node_interfaces::OnSetParametersCallbackHandle::SharedPtr param_cb_;
 
-  // IMU ring buffer and subscription
-  rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr imu_sub_;
-  std::deque<ImuSample> imu_buffer_;
-  mutable std::mutex imu_mutex_;
-  std::shared_ptr<const AveragedImu> imu_snapshot_;  // atomic-shared with SourceAdapters
-  std::string imu_frame_id_;
+  // Global IMU buffer (shared with SourceAdapters that don't have per-source IMU)
+  std::shared_ptr<ImuBuffer> global_imu_;
 
   // Stale data buffering - ensures publishing at specified frequency
   CloudT::Ptr last_cloud_;

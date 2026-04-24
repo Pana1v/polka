@@ -22,6 +22,7 @@
 #include <sensor_msgs/msg/point_cloud2.hpp>
 #include <sensor_msgs/msg/laser_scan.hpp>
 #include <laser_geometry/laser_geometry.hpp>
+#include <tf2_ros/buffer.h>
 
 #include <Eigen/Core>
 #include <functional>
@@ -40,7 +41,9 @@ public:
 
   SourceAdapter(rclcpp::Node * node, const SourceConfig & config, bool gpu_filters = false,
                 ImuGetter imu_getter = nullptr, bool deskew_enabled = false,
-                const std::string & timestamp_field_hint = "auto");
+                const std::string & timestamp_field_hint = "auto",
+                std::shared_ptr<tf2_ros::Buffer> tf_buffer = nullptr,
+                const std::string & imu_frame_id = "");
 
   CloudT::ConstPtr get_latest() const;
   bool is_stale(double timeout_sec, const rclcpp::Time & now) const;
@@ -50,6 +53,7 @@ public:
   uint64_t message_count() const { return message_counter_.load(); }
   const FilterParams & filter_params() const { return config_.filter_params; }
   void rebuild_filters(const FilterParams & fp);
+  void set_imu_frame_id(const std::string & frame_id);
 
 private:
   void pc2_callback(sensor_msgs::msg::PointCloud2::ConstSharedPtr msg);
@@ -61,6 +65,7 @@ private:
   // Per-point deskewing
   void detect_timestamp_field(const sensor_msgs::msg::PointCloud2 & msg);
   double extract_point_time(const uint8_t * point_data) const;
+  void cache_imu_rotation();
   void deskew_cloud(CloudT & cloud, const sensor_msgs::msg::PointCloud2 & raw_msg,
                     const AveragedImu & imu);
 
@@ -91,6 +96,11 @@ private:
   std::string timestamp_field_hint_{"auto"};
   bool timestamp_field_detected_{false};
   bool has_timestamp_field_{false};
+  std::shared_ptr<tf2_ros::Buffer> tf_buffer_;
+  std::string imu_frame_id_;
+  Eigen::Matrix3d R_imu_to_sensor_ = Eigen::Matrix3d::Identity();
+  bool imu_rotation_cached_ = false;
+
   uint32_t timestamp_field_offset_{0};
   uint8_t timestamp_field_datatype_{0};  // FLOAT32 or FLOAT64
 };

@@ -41,7 +41,8 @@ polka:
     motion_compensation:
       enabled: false
       imu_topic: ""                  # sensor_msgs/Imu topic (empty = disabled)
-      max_imu_age: 0.2              # seconds - reject stale IMU data
+      imu_frame: ""                  # If empty use header.frame_id
+      max_imu_age: 0.2               # seconds - reject stale IMU data
       imu_buffer_size: 200           # ring buffer capacity (~1s at 200Hz)
       per_point_deskew: true         # per-point correction within each scan
                                      # requires per-point timestamps in PointCloud2

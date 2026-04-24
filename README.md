@@ -65,7 +65,7 @@ cd ~/ros2_ws
 colcon build --packages-select polka
 
 # With CUDA support
-colcon build --packages-select polka --cmake-args -DPOLKA_ENABLE_CUDA=ON
+colcon build --packages-select polka --cmake-args -DWITH_CUDA=ON
 ```
 
 ## Quick Start
@@ -83,12 +83,36 @@ colcon build --packages-select polka --cmake-args -DPOLKA_ENABLE_CUDA=ON
 
 5. Launch:
    ```bash
-   ros2 launch polka polka.launch.py params_file:=config/my_robot.yaml
+   ros2 launch polka polka.launch.py config_file:=config/my_robot.yaml
    ```
 
 ## Configuration
 
 All parameters live under the `polka` namespace. See [config/example_params.yaml](config/example_params.yaml) for the full annotated reference.
+
+### Minimal Config
+
+```yaml
+polka:
+  ros__parameters:
+    output_frame_id: "base_link"
+    output_rate: 20.0
+    source_names: ["front_3d", "rear_2d"]
+    sources:
+      front_3d:
+        topic: "/front_lidar/points"
+        type: "pointcloud2"
+      rear_2d:
+        topic: "/rear_lidar/scan"
+        type: "laserscan"
+    outputs:
+      cloud:
+        enabled: true
+      scan:
+        enabled: true
+```
+
+Everything else has sensible defaults. Add filters, deskewing, and GPU acceleration as needed.
 
 ### Key Parameters
 
@@ -97,7 +121,18 @@ All parameters live under the `polka` namespace. See [config/example_params.yaml
 | `output_frame_id` | `"base_link"` | Target frame for all merged output |
 | `output_rate` | `20.0` | Merge + publish rate (Hz) |
 | `source_timeout` | `0.5` | Drop source if no data within this window (s) |
+| `enable_gpu` | `true` | Use CUDA merge engine when available (falls back to CPU) |
 | `timestamp_strategy` | `"earliest"` | Output stamp: `earliest`, `latest`, `average`, or `local` |
+
+### Per-Source Parameters
+
+| Parameter | Default | Description |
+|---|---|---|
+| `sources.<name>.topic` | `""` | Subscription topic (required) |
+| `sources.<name>.type` | `"pointcloud2"` | `"pointcloud2"` or `"laserscan"` |
+| `sources.<name>.imu_topic` | `""` | Per-source IMU override (empty = use global) |
+| `sources.<name>.qos_reliability` | `"best_effort"` | `"best_effort"` or `"reliable"` |
+| `sources.<name>.qos_history_depth` | `1` | QoS queue depth |
 
 ### Motion Compensation (IMU Deskewing)
 
@@ -117,19 +152,27 @@ motion_compensation:
 
 #### Per-Source IMU Override
 
-Articulated platforms (hinged vehicles, manipulators, humanoids) can override the IMU on a per-source basis. Each source uses TF to rotate its IMU's angular velocity into the sensor frame, so `robot_state_publisher` must keep the IMU-to-sensor transform current.
+Articulated platforms (hinged vehicles, manipulators, humanoids, rotating turrets) can override the IMU on a per-source basis: each moving sensor reads an IMU rigidly mounted to the moving body, while fixed sensors share the global platform IMU. polka uses TF to rotate both angular velocity and linear acceleration from the IMU frame into each sensor's frame, so `robot_state_publisher` must keep the IMU→sensor transform current — a dynamic transform (e.g. driven by joint_states from a turret encoder) works out of the box.
 
 ```yaml
+motion_compensation:
+  enabled: true
+  imu_topic: "/imu/data"          # global fallback IMU
+
 sources:
-  front_3d:
-    topic: "/front_lidar/points"
-    imu_topic: "/front_lidar/imu"   # integrated IMU on front segment
-  rear_2d:
-    topic: "/rear_lidar/scan"
-    # imu_topic omitted — falls back to motion_compensation.imu_topic
+  turret_lidar:
+    topic: "/turret/points"
+    imu_topic: "/turret/imu/data" # per-source override
+  chassis_lidar:
+    topic: "/chassis/points"
+    # imu_topic omitted — falls back to /imu/data
 ```
 
-The global `motion_compensation.imu_topic` remains the recommended path for rigid platforms.
+A working snippet with two sources is appended to [`config/example_params.yaml`](config/example_params.yaml) ("articulated platform" block). The global `motion_compensation.imu_topic` remains the recommended path for fully rigid platforms.
+
+**Per-point timestamp auto-detect.** With `deskew_timestamp_field: "auto"` polka scans each `PointCloud2` for one of: `time`, `t`, `timestamp`, `time_stamp`, `offset_time`, `timeStamp`. Set a specific name if your driver uses something else; if no usable field is present polka logs once and falls back to whole-scan (non-per-point) deskewing for that source.
+
+**Gravity subtraction.** Gravity is subtracted from `linear_acceleration` only when the IMU publishes a valid orientation: `orientation_covariance[0] >= 0` and a non-degenerate quaternion. Otherwise acceleration is zeroed and deskewing is rotation-only — still useful, but translation during the scan is not corrected.
 
 ### Output Filters
 
@@ -143,14 +186,14 @@ Applied to the merged cloud before publishing, in this order:
 ```yaml
 outputs:
   cloud:
-    height_filter:
+    height_cap:
       enabled: true
       z_min: -1.0
       z_max: 3.0
     voxel:
       enabled: true
       leaf_size: 0.05
-    footprint_filter:
+    self_filter:
       enabled: true
       box_names: ["chassis"]
       chassis:
@@ -274,11 +317,13 @@ polka/
 │   ├── types.hpp                   # Config structs and type definitions
 │   ├── config_loader.hpp           # Parameter loading and hot-reload
 │   ├── source_adapter.hpp          # Subscribes to and converts sensor data
+│   ├── imu_buffer.hpp             # IMU ring buffer with atomic snapshot
+│   ├── se3_exp.hpp                # SE(3) exponential map for motion compensation
 │   ├── filters/
 │   │   ├── i_filter.hpp            # Filter interface
 │   │   ├── range_filter.hpp        # Min/max distance filter
 │   │   ├── angular_filter.hpp      # Angular sector filter
-│   │   └── box_filter.hpp          # Axis-aligned box filter (+ invert for footprint filter)
+│   │   └── box_filter.hpp          # Axis-aligned box filter (+ invert for self filter)
 │   └── merge_engine/
 │       ├── i_merge_engine.hpp      # Merge engine interface
 │       ├── cpu_merge_engine.hpp    # CPU merge implementation
@@ -289,6 +334,7 @@ polka/
     ├── polka_node.cpp              # Node implementation
     ├── config_loader.cpp           # Parameter loading logic
     ├── source_adapter.cpp          # Source subscription logic
+    ├── imu_buffer.cpp             # IMU buffer implementation
     ├── filters/                    # Filter implementations
     └── merge_engine/               # Merge engine implementations
 ```

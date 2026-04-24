@@ -102,6 +102,7 @@ struct FlattenParams {
 struct SourceConfig {
   std::string name;
   std::string topic;
+  std::string imu_topic;  // per-source IMU override (empty = use global)
   SourceType type = SourceType::POINTCLOUD2;
   std::string qos_reliability = "best_effort";
   int qos_history_depth = 1;

@@ -56,8 +56,6 @@ rclcpp::QoS build_qos(const OutputQosConfig & cfg)
 
   if (cfg.liveliness == "manual_by_topic")
     qos.liveliness(rclcpp::LivelinessPolicy::ManualByTopic);
-  else if (cfg.liveliness == "manual_by_node")
-    qos.liveliness(rclcpp::LivelinessPolicy::ManualByNode);
   else
     qos.liveliness(rclcpp::LivelinessPolicy::Automatic);
 

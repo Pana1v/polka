@@ -97,6 +97,11 @@ bool SourceAdapter::validate_fields(const sensor_msgs::msg::PointCloud2 & msg)
     return false;
   }
   missing_intensity_ = !has_intensity;
+  if (missing_intensity_) {
+    RCLCPP_WARN(logger_,
+      "polka: source '%s' missing 'intensity' field - publishing with intensity=0",
+      config_.name.c_str());
+  }
   return true;
 }
 
@@ -228,12 +233,6 @@ void SourceAdapter::pc2_callback(sensor_msgs::msg::PointCloud2::ConstSharedPtr m
     fields_valid_ = validate_fields(*msg);
   }
   if (!fields_valid_) return;
-
-  if (missing_intensity_) {
-    RCLCPP_WARN_THROTTLE(logger_, *node_->get_clock(), 10000,
-      "polka: source '%s' missing 'intensity' field - publishing with intensity=0",
-      config_.name.c_str());
-  }
 
   // Detect per-point timestamp field on first message
   if (!timestamp_field_detected_)

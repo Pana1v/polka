@@ -267,8 +267,7 @@ MergeConfig ConfigLoader::load()
   }
 
   validate(cfg);
-  RCLCPP_INFO(logger_, "loaded %zu sources, frame='%s', rate=%.1f Hz",
-    cfg.sources.size(), cfg.output_frame_id.c_str(), cfg.output_rate);
+  // Summary printed via PolkaNode startup banner once construction completes.
   return cfg;
 }
 

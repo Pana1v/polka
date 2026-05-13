@@ -51,6 +51,7 @@ private:
   bool reconfigure();
   void voxel_downsample(CloudT & cloud);
   void height_cap(CloudT & cloud);
+  void log_startup_banner() const;
 
   // IMU-based motion compensation (global)
 
@@ -68,9 +69,8 @@ private:
   rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr cloud_pub_;
   rclcpp::Publisher<sensor_msgs::msg::LaserScan>::SharedPtr scan_pub_;
 
-  // TF failure tracking per source
+  // Per-source fallback transforms used when TF lookup fails
   std::vector<Eigen::Isometry3d> last_good_transforms_;
-  std::vector<int> tf_fail_counts_;
 
   // Runtime reconfiguration
   ConfigLoader config_loader_;

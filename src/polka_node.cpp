@@ -13,11 +13,14 @@
 // limitations under the License.
 
 #include "polka/polka_node.hpp"
+#include "polka/log_format.hpp"
 #include "polka/merge_engine/cpu_merge_engine.hpp"
 #include "polka/filters/range_filter.hpp"
 #include "polka/filters/angular_filter.hpp"
 #include "polka/filters/box_filter.hpp"
 #include "polka/se3_exp.hpp"
+
+#include <sstream>
 
 #ifdef POLKA_CUDA_ENABLED
 #include "polka/merge_engine/cuda_merge_engine.hpp"
@@ -91,15 +94,13 @@ PolkaNode::PolkaNode(const rclcpp::NodeOptions & options)
     if (device_count > 0) {
       merge_engine_ = std::make_unique<CudaMergeEngine>(config_);
     } else {
-      RCLCPP_WARN(get_logger(), "enable_gpu=true but no CUDA device found, falling back to CPU");
+      RCLCPP_WARN(get_logger(),
+        "polka: enable_gpu=true but no CUDA device found, falling back to CPU");
     }
   }
 #endif
   if (!merge_engine_)
     merge_engine_ = std::make_unique<CpuMergeEngine>();
-  RCLCPP_INFO(get_logger(), "using %s merge engine%s",
-    merge_engine_->is_gpu() ? "GPU (full pipeline)" : "CPU",
-    merge_engine_->is_gpu() ? "" : " (set enable_gpu:=true for GPU acceleration)");
 
   if (config_.motion_compensation.enabled && !config_.motion_compensation.imu_topic.empty())
     global_imu_ = std::make_shared<ImuBuffer>(
@@ -107,7 +108,7 @@ PolkaNode::PolkaNode(const rclcpp::NodeOptions & options)
       config_.motion_compensation.imu_buffer_size);
   else if (config_.motion_compensation.enabled)
     RCLCPP_WARN(get_logger(),
-      "motion compensation enabled but imu_topic is empty, deskewing will not activate");
+      "polka: motion compensation enabled but imu_topic is empty, deskewing will not activate");
 
   // Global IMU getter for source adapters that don't have a per-source IMU
   SourceAdapter::ImuGetter imu_getter = nullptr;
@@ -127,7 +128,6 @@ PolkaNode::PolkaNode(const rclcpp::NodeOptions & options)
       tf_buffer_, config_.motion_compensation.imu_buffer_size));
 
   last_good_transforms_.resize(sources_.size(), Eigen::Isometry3d::Identity());
-  tf_fail_counts_.resize(sources_.size(), 0);
 
   build_output_filters();
 
@@ -143,11 +143,12 @@ PolkaNode::PolkaNode(const rclcpp::NodeOptions & options)
     output_timer_ = create_wall_timer(
       std::chrono::duration_cast<std::chrono::nanoseconds>(period),
       std::bind(&PolkaNode::output_callback, this));
-    RCLCPP_INFO(get_logger(), "output timer at %.1f Hz", config_.output_rate);
   }
 
   for (const auto & sc : config_.sources)
     source_names_.push_back(sc.name);
+
+  log_startup_banner();
 
   param_cb_ = add_on_set_parameters_callback(
     [this](const std::vector<rclcpp::Parameter> &) {
@@ -175,6 +176,49 @@ void PolkaNode::build_output_filters()
   }
 }
 
+void PolkaNode::log_startup_banner() const
+{
+  std::ostringstream os;
+  os << '\n';
+  os << "polka: ──────────── started ────────────\n";
+  os << "polka:   engine        : " << (merge_engine_->is_gpu() ? "CUDA (full pipeline)" : "CPU")
+     << '\n';
+
+  char rate_buf[32];
+  std::snprintf(rate_buf, sizeof(rate_buf), "%6.1f Hz", config_.output_rate);
+  os << "polka:   output rate   : " << rate_buf << '\n';
+  os << "polka:   output frame  : '" << config_.output_frame_id << "'\n";
+
+  const auto & mc = config_.motion_compensation;
+  if (mc.enabled && !mc.imu_topic.empty()) {
+    os << "polka:   imu_topic     : '" << mc.imu_topic
+       << "' (buffer=" << mc.imu_buffer_size << ")\n";
+  } else if (mc.enabled) {
+    os << "polka:   imu_topic     : (motion comp enabled, no global topic)\n";
+  } else {
+    os << "polka:   imu_topic     : (motion comp disabled)\n";
+  }
+
+  os << "polka:   sources (" << config_.sources.size() << "):\n";
+  for (const auto & sc : config_.sources) {
+    const char * type_str =
+      (sc.type == SourceType::POINTCLOUD2) ? "pointcloud2" : "laserscan  ";
+    const auto & fp = sc.filter_params;
+    int nfilters = (fp.range_filter_enabled ? 1 : 0) +
+                   (fp.angular_filter_enabled ? 1 : 0) +
+                   (fp.box_filter_enabled ? 1 : 0);
+    os << "polka:     " << sc.name
+       << "  " << type_str
+       << "  '" << sc.topic << "'"
+       << "  filters=" << nfilters
+       << "  deskew=" << ((mc.enabled && mc.per_point_deskew) ? "on" : "off")
+       << '\n';
+  }
+  os << "polka: ──────────────────────────────────";
+
+  RCLCPP_INFO(get_logger(), "%s", os.str().c_str());
+}
+
 void PolkaNode::output_callback()
 {
   auto now = this->now();
@@ -194,8 +238,8 @@ void PolkaNode::output_callback()
     if (!cloud || cloud->empty()) continue;
 
     if (src->is_stale(config_.source_timeout, now)) {
-      RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 2000,
-        "source '%s' is stale", src->name().c_str());
+      RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), kLogThrottleNormalMs,
+        "polka: source '%s' is stale", src->name().c_str());
       continue;
     }
 
@@ -205,13 +249,10 @@ void PolkaNode::output_callback()
         config_.output_frame_id, src->frame_id(), tf2::TimePointZero);
       transform = tf2::transformToEigen(tf_msg.transform);
       last_good_transforms_[i] = transform;
-      tf_fail_counts_[i] = 0;
     } catch (const tf2::TransformException & ex) {
-      tf_fail_counts_[i]++;
-      if (tf_fail_counts_[i] <= 5)
-        RCLCPP_WARN(get_logger(), "TF failed for '%s': %s", src->name().c_str(), ex.what());
-      else if (tf_fail_counts_[i] == 6)
-        RCLCPP_ERROR(get_logger(), "TF persistently failing for '%s', suppressing", src->name().c_str());
+      RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), kLogThrottleNormalMs,
+        "polka: TF failed for '%s': %s — using last known good transform",
+        src->name().c_str(), ex.what());
       transform = last_good_transforms_[i];
     }
 
@@ -250,8 +291,9 @@ void PolkaNode::output_callback()
     auto [mn, mx] = std::minmax_element(stamps.begin(), stamps.end());
     double spread = (*mx - *mn).seconds();
     if (spread > config_.max_source_spread_warn)
-      RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 5000,
-        "source spread %.3f s > %.3f s", spread, config_.max_source_spread_warn);
+      RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), kLogThrottleNormalMs,
+        "polka: source spread %6.3f s > %6.3f s",
+        spread, config_.max_source_spread_warn);
   }
 
   auto output_stamp = compute_output_stamp(stamps);
@@ -461,9 +503,11 @@ bool PolkaNode::reconfigure()
   try {
     config_ = config_loader_.reload(source_names_);
   } catch (const std::exception & ex) {
-    RCLCPP_ERROR(get_logger(), "reconfigure failed: %s", ex.what());
+    RCLCPP_ERROR(get_logger(), "polka: reconfigure failed: %s", ex.what());
     return false;
   }
+
+  std::vector<std::string> changes;
 
   // Rebuild output timer if rate changed
   if (config_.output_rate != prev_rate && config_.output_rate > 0.0) {
@@ -472,7 +516,9 @@ bool PolkaNode::reconfigure()
     output_timer_ = create_wall_timer(
       std::chrono::duration_cast<std::chrono::nanoseconds>(period),
       std::bind(&PolkaNode::output_callback, this));
-    RCLCPP_INFO(get_logger(), "output rate changed to %.1f Hz", config_.output_rate);
+    char buf[64];
+    std::snprintf(buf, sizeof(buf), "output_rate=%.1fHz", config_.output_rate);
+    changes.emplace_back(buf);
   }
 
   // Rebuild cloud publisher if toggled
@@ -497,10 +543,18 @@ bool PolkaNode::reconfigure()
     global_imu_ = std::make_shared<ImuBuffer>(
       this, config_.motion_compensation.imu_topic,
       config_.motion_compensation.imu_buffer_size);
+    changes.emplace_back("motion_compensation=on");
   } else if (!imu_now_enabled && imu_was_enabled) {
     global_imu_.reset();
-    RCLCPP_INFO(get_logger(), "motion compensation disabled");
+    changes.emplace_back("motion_compensation=off");
   }
+
+  if (config_.cloud_output.enabled != prev_cloud_enabled)
+    changes.emplace_back(
+      std::string("cloud_output=") + (config_.cloud_output.enabled ? "on" : "off"));
+  if (config_.scan_output.enabled != prev_scan_enabled)
+    changes.emplace_back(
+      std::string("scan_output=") + (config_.scan_output.enabled ? "on" : "off"));
 
   // Rebuild output filters
   output_filters_.clear();
@@ -510,7 +564,16 @@ bool PolkaNode::reconfigure()
   for (size_t i = 0; i < sources_.size() && i < config_.sources.size(); ++i)
     sources_[i]->rebuild_filters(config_.sources[i].filter_params);
 
-  RCLCPP_INFO(get_logger(), "reconfigured");
+  if (changes.empty()) {
+    RCLCPP_INFO(get_logger(), "polka: reconfigured (filters only)");
+  } else {
+    std::string joined;
+    for (size_t i = 0; i < changes.size(); ++i) {
+      if (i) joined += ", ";
+      joined += changes[i];
+    }
+    RCLCPP_INFO(get_logger(), "polka: reconfigured — %s", joined.c_str());
+  }
   return true;
 }
 

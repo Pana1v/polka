@@ -13,6 +13,7 @@
 // limitations under the License.
 
 #include "polka/imu_buffer.hpp"
+#include "polka/log_format.hpp"
 #include <Eigen/Geometry>
 #include <cmath>
 
@@ -24,7 +25,8 @@ ImuBuffer::ImuBuffer(rclcpp::Node * node, const std::string & topic, int buffer_
   sub_ = node->create_subscription<sensor_msgs::msg::Imu>(
     topic, rclcpp::SensorDataQoS(),
     std::bind(&ImuBuffer::callback, this, std::placeholders::_1));
-  RCLCPP_INFO(logger_, "IMU buffer: subscribing to '%s' (capacity %d)", topic.c_str(), buffer_size);
+  RCLCPP_INFO(logger_, "polka: IMU buffer subscribing to '%s' (capacity %d)",
+    topic.c_str(), buffer_size);
 }
 
 std::shared_ptr<const AveragedImu> ImuBuffer::snapshot() const
@@ -38,8 +40,8 @@ void ImuBuffer::callback(sensor_msgs::msg::Imu::ConstSharedPtr msg)
   const auto & w = msg->angular_velocity;
   if (!std::isfinite(a.x) || !std::isfinite(a.y) || !std::isfinite(a.z) ||
       !std::isfinite(w.x) || !std::isfinite(w.y) || !std::isfinite(w.z)) {
-    RCLCPP_WARN_THROTTLE(logger_, *clock_, 1000,
-      "IMU buffer: non-finite values, ignoring");
+    RCLCPP_WARN_THROTTLE(logger_, *clock_, kLogThrottleFastMs,
+      "polka: IMU buffer received non-finite values, ignoring");
     return;
   }
 
@@ -55,13 +57,13 @@ void ImuBuffer::callback(sensor_msgs::msg::Imu::ConstSharedPtr msg)
       accel -= g_imu;
     } else {
       accel.setZero();
-      RCLCPP_WARN_THROTTLE(logger_, *clock_, 5000,
-        "IMU buffer: degenerate orientation quaternion, translation deskew disabled");
+      RCLCPP_WARN_THROTTLE(logger_, *clock_, kLogThrottleNormalMs,
+        "polka: IMU has degenerate orientation quaternion, translation deskew disabled");
     }
   } else {
     accel.setZero();
     RCLCPP_WARN_ONCE(logger_,
-      "IMU buffer: IMU has no orientation — cannot subtract gravity, "
+      "polka: IMU has no orientation — cannot subtract gravity, "
       "translation deskew disabled (rotation-only)");
   }
 

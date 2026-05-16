@@ -10,12 +10,10 @@
 
 ## Supported ROS 2 Distributions
 
-<p align="center">
 | Distro | Ubuntu | Branch |
 |--------|--------|--------|
 | Humble | 22.04  | [`humble`](../../tree/humble) |
 | Jazzy  | 24.04  | [`jazzy`](../../tree/jazzy) |
-</p>
 
 ```bash
 # Clone the branch matching your distro

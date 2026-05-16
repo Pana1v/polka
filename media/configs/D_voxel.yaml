@@ -1,0 +1,81 @@
+polka:
+  ros__parameters:
+    use_sim_time: true
+    output_frame_id: base_link
+    output_rate: 10.0
+    source_timeout: 1.0
+    enable_gpu: false
+    timestamp_strategy: earliest
+    max_source_spread_warn: 0.2
+    motion_compensation:
+      enabled: false
+      imu_topic: ''
+      imu_frame: base_link
+      max_imu_age: 0.2
+      imu_buffer_size: 200
+      per_point_deskew: false
+      deskew_timestamp_field: timestamp
+    outputs:
+      cloud:
+        enabled: true
+        topic: ~/merged_cloud
+        qos:
+          reliability: reliable
+          durability: volatile
+          history_depth: 10
+        filters:
+          range:
+            enabled: false
+            min: 0.1
+            max: 30.0
+          angular:
+            enabled: false
+          box:
+            enabled: false
+        height_cap:
+          enabled: false
+          z_min: -1.0
+          z_max: 3.0
+        random_grid:
+          enabled: false
+          leaf_size: 0.05
+          seed: 42
+        voxel:
+          enabled: true
+          leaf_size: 0.25
+        self_filter:
+          enabled: false
+      scan:
+        enabled: false
+    source_names:
+    - front
+    - back
+    sources:
+      front:
+        topic: /lidar/front/rslidar_points
+        type: pointcloud2
+        qos_reliability: best_effort
+        qos_history_depth: 1
+        filters:
+          range:
+            enabled: false
+            min: 0.3
+            max: 30.0
+          angular:
+            enabled: false
+          box:
+            enabled: false
+      back:
+        topic: /lidar/back/rslidar_points
+        type: pointcloud2
+        qos_reliability: best_effort
+        qos_history_depth: 1
+        filters:
+          range:
+            enabled: false
+            min: 0.3
+            max: 30.0
+          angular:
+            enabled: false
+          box:
+            enabled: false

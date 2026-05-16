@@ -1,0 +1,7 @@
+# Override the bag's recorded /tf_static QoS to transient_local so subscribers
+# (tf2_ros::TransformListener) receive the latched message after they start.
+/tf_static:
+  reliability: reliable
+  durability: transient_local
+  history: keep_last
+  depth: 100

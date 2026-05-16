@@ -2,7 +2,7 @@
 
 <p align="center">
   <img src="images/polka.png" alt="Polka" width="700"/>
-  <img width="700" alt="pipeline_demo" src="https://github.com/user-attachments/assets/04921503-ae47-4353-80c0-e448bb05feec" />
+  <img width="700" alt="pipeline_demo" src="media/pipeline_demo.gif" />
 </p>
 
 

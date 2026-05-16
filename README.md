@@ -4,6 +4,8 @@
   <img src="images/polka.png" alt="Polka" width="700"/>
 </p>
 
+<img width="560" height="316" alt="pipeline_demo" src="https://github.com/user-attachments/assets/04921503-ae47-4353-80c0-e448bb05feec" />
+
 **Multi-LiDAR fusion node for ROS 2** that merges any mix of PointCloud2 and LaserScan sources into a unified output, with optional CUDA GPU acceleration.
 
 ## Supported ROS 2 Distributions

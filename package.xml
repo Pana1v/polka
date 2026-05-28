@@ -2,10 +2,16 @@
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
   <name>polka</name>
-  <version>0.1.0</version>
+  <version>0.3.0</version>
   <description>ROS2 composable node for multi-LiDAR fusion with optional CUDA acceleration.</description>
   <maintainer email="praajarpit@gmail.com">Panav Arpit Raaj</maintainer>
   <license>Apache-2.0</license>
+
+  <url type="website">https://github.com/Pan-Navigator/polka</url>
+  <url type="repository">https://github.com/Pan-Navigator/polka</url>
+  <url type="bugtracker">https://github.com/Pan-Navigator/polka/issues</url>
+
+  <author email="praajarpit@gmail.com">Panav Arpit Raaj</author>
 
   <buildtool_depend>ament_cmake</buildtool_depend>
 

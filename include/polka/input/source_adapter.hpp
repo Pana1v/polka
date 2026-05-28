@@ -12,11 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#ifndef POLKA__SOURCE_ADAPTER_HPP
-#define POLKA__SOURCE_ADAPTER_HPP
+#ifndef POLKA__INPUT__SOURCE_ADAPTER_HPP
+#define POLKA__INPUT__SOURCE_ADAPTER_HPP
 
 #include "polka/types.hpp"
-#include "polka/imu_buffer.hpp"
+#include "polka/input/imu_buffer.hpp"
 #include "polka/filters/i_filter.hpp"
 
 #include <rclcpp/rclcpp.hpp>
@@ -106,4 +106,4 @@ private:
 
 }  // namespace polka
 
-#endif  // POLKA__SOURCE_ADAPTER_HPP
+#endif  // POLKA__INPUT__SOURCE_ADAPTER_HPP

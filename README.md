@@ -312,33 +312,42 @@ graph LR
 ```
 polka/
 ├── config/example_params.yaml      # Full annotated config reference
-├── images/polka.png                # Project image
 ├── launch/polka.launch.py          # Launch file
 ├── include/polka/
-│   ├── polka_node.hpp              # Main composable node
+│   ├── polka_node.hpp              # Main composable node (orchestration only)
 │   ├── types.hpp                   # Config structs and type definitions
-│   ├── config_loader.hpp           # Parameter loading and hot-reload
-│   ├── source_adapter.hpp          # Subscribes to and converts sensor data
-│   ├── imu_buffer.hpp             # IMU ring buffer with atomic snapshot
-│   ├── se3_exp.hpp                # SE(3) exponential map for motion compensation
+│   ├── config/
+│   │   └── config_loader.hpp       # Parameter loading and hot-reload
+│   ├── input/
+│   │   ├── source_adapter.hpp      # Subscribes to and converts sensor data
+│   │   └── imu_buffer.hpp          # IMU ring buffer with atomic snapshot
 │   ├── filters/
 │   │   ├── i_filter.hpp            # Filter interface
+│   │   ├── filter_chain.hpp        # Factory: build a filter chain from FilterParams
 │   │   ├── range_filter.hpp        # Min/max distance filter
 │   │   ├── angular_filter.hpp      # Angular sector filter
 │   │   └── box_filter.hpp          # Axis-aligned box filter (+ invert for self filter)
-│   └── merge_engine/
-│       ├── i_merge_engine.hpp      # Merge engine interface
-│       ├── cpu_merge_engine.hpp    # CPU merge implementation
-│       ├── cuda_merge_engine.hpp   # CUDA GPU merge implementation
-│       └── cuda_types.cuh          # GPU type definitions
+│   ├── merge_engine/
+│   │   ├── i_merge_engine.hpp      # Merge engine interface
+│   │   ├── cpu_merge_engine.hpp    # CPU merge implementation
+│   │   ├── cuda_merge_engine.hpp   # CUDA GPU merge implementation
+│   │   └── cuda_types.cuh          # GPU type definitions
+│   ├── output/
+│   │   ├── output_pipeline.hpp     # Post-merge processing (filter, height cap, voxel)
+│   │   └── scan_builder.hpp        # LaserScan assembly from cloud or range vector
+│   └── util/
+│       ├── qos_builder.hpp         # build_qos() for output publishers
+│       ├── se3_exp.hpp             # SE(3) exponential map for motion compensation
+│       └── log_format.hpp          # Log throttle constants
 └── src/
     ├── main.cpp                    # Entry point
     ├── polka_node.cpp              # Node implementation
-    ├── config_loader.cpp           # Parameter loading logic
-    ├── source_adapter.cpp          # Source subscription logic
-    ├── imu_buffer.cpp             # IMU buffer implementation
+    ├── config_loader.cpp
+    ├── source_adapter.cpp
+    ├── imu_buffer.cpp
     ├── filters/                    # Filter implementations
-    └── merge_engine/               # Merge engine implementations
+    ├── merge_engine/               # Merge engine implementations
+    └── output/                     # OutputPipeline and ScanBuilder implementations
 ```
 
 ## Acknowledgments

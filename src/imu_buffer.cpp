@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "polka/imu_buffer.hpp"
-#include "polka/log_format.hpp"
+#include "polka/input/imu_buffer.hpp"
+#include "polka/util/log_format.hpp"
 #include <Eigen/Geometry>
 #include <cmath>
 

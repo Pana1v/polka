@@ -52,6 +52,8 @@ set(POLKA_CORE_SOURCES
   src/filters/box_filter.cpp
   src/source_adapter.cpp
   src/merge_engine/cpu_merge_engine.cpp
+  src/output/output_pipeline.cpp
+  src/output/scan_builder.cpp
   src/polka_node.cpp
 )
 

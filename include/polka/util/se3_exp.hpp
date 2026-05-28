@@ -18,8 +18,8 @@
 //   "A Robust Approach for LiDAR-Inertial Odometry Without Sensor-Specific Modeling,"
 //   arXiv:2509.06593, 2025.
 
-#ifndef POLKA__SE3_EXP_HPP_
-#define POLKA__SE3_EXP_HPP_
+#ifndef POLKA__UTIL__SE3_EXP_HPP_
+#define POLKA__UTIL__SE3_EXP_HPP_
 
 #include <Eigen/Geometry>
 #include <cmath>
@@ -93,4 +93,4 @@ inline Eigen::Isometry3d compute_motion_delta(
 
 }  // namespace polka
 
-#endif  // POLKA__SE3_EXP_HPP_
+#endif  // POLKA__UTIL__SE3_EXP_HPP_

@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "polka/config_loader.hpp"
+#include "polka/config/config_loader.hpp"
 #include <stdexcept>
 #include <cmath>
 

@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#ifndef POLKA__CONFIG_LOADER_HPP
-#define POLKA__CONFIG_LOADER_HPP
+#ifndef POLKA__CONFIG__CONFIG_LOADER_HPP
+#define POLKA__CONFIG__CONFIG_LOADER_HPP
 
 #include "polka/types.hpp"
 #include <rclcpp/rclcpp.hpp>
@@ -40,4 +40,4 @@ private:
 
 }  // namespace polka
 
-#endif  // POLKA__CONFIG_LOADER_HPP
+#endif  // POLKA__CONFIG__CONFIG_LOADER_HPP

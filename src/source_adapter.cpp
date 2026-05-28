@@ -12,11 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "polka/source_adapter.hpp"
-#include "polka/se3_exp.hpp"
-#include "polka/filters/range_filter.hpp"
-#include "polka/filters/angular_filter.hpp"
-#include "polka/filters/box_filter.hpp"
+#include "polka/input/source_adapter.hpp"
+#include "polka/util/se3_exp.hpp"
+#include "polka/filters/filter_chain.hpp"
 
 #include <pcl_conversions/pcl_conversions.h>
 #include <sensor_msgs/msg/point_field.hpp>
@@ -63,16 +61,8 @@ SourceAdapter::SourceAdapter(rclcpp::Node * node, const SourceConfig & config, b
       std::bind(&SourceAdapter::scan_callback, this, std::placeholders::_1));
   }
 
-  if (!gpu_filters_) {
-    const auto & fp = config.filter_params;
-    if (fp.range_filter_enabled)
-      filters_.push_back(std::make_unique<RangeFilter>(fp.min_range, fp.max_range));
-    if (fp.angular_filter_enabled && !fp.angular_ranges.empty())
-      filters_.push_back(
-        std::make_unique<AngularFilter>(fp.angular_ranges, fp.angular_invert));
-    if (fp.box_filter_enabled)
-      filters_.push_back(std::make_unique<BoxFilter>(fp.box_min, fp.box_max));
-  }
+  if (!gpu_filters_)
+    filters_ = build_filter_chain(config.filter_params);
 
   RCLCPP_INFO(logger_, "polka: source '%s' subscribed to '%s' (%s), %zu filters%s",
     config.name.c_str(), config.topic.c_str(),
@@ -298,13 +288,8 @@ void SourceAdapter::rebuild_filters(const FilterParams & fp)
 {
   config_.filter_params = fp;
   filters_.clear();
-  if (gpu_filters_) return;
-  if (fp.range_filter_enabled)
-    filters_.push_back(std::make_unique<RangeFilter>(fp.min_range, fp.max_range));
-  if (fp.angular_filter_enabled && !fp.angular_ranges.empty())
-    filters_.push_back(std::make_unique<AngularFilter>(fp.angular_ranges, fp.angular_invert));
-  if (fp.box_filter_enabled)
-    filters_.push_back(std::make_unique<BoxFilter>(fp.box_min, fp.box_max));
+  if (!gpu_filters_)
+    filters_ = build_filter_chain(fp);
 }
 
 }  // namespace polka

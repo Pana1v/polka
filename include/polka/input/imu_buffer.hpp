@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#ifndef POLKA__IMU_BUFFER_HPP
-#define POLKA__IMU_BUFFER_HPP
+#ifndef POLKA__INPUT__IMU_BUFFER_HPP
+#define POLKA__INPUT__IMU_BUFFER_HPP
 
 #include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/msg/imu.hpp>
@@ -59,4 +59,4 @@ private:
 
 }  // namespace polka
 
-#endif  // POLKA__IMU_BUFFER_HPP
+#endif  // POLKA__INPUT__IMU_BUFFER_HPP

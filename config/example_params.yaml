@@ -11,7 +11,7 @@
 #
 # Each source needs a valid TF from its frame_id -> output_frame_id.
 # Every parameter (per-source/output filters, IMU deskewing, QoS, per-point
-# timestamps, ...) is documented in config/params_reference.yaml.
+# timestamps, ...) is documented in config/detailed_params.yaml.
 # ============================================================================
 
 polka:

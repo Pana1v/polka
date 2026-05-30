@@ -90,7 +90,7 @@ colcon build --packages-select polka --cmake-args -DWITH_CUDA=ON
 
 ## Configuration
 
-All parameters live under the `polka` namespace. [config/example_params.yaml](config/example_params.yaml) is a minimal starter; see [config/params_reference.yaml](config/params_reference.yaml) for the full annotated reference of every parameter.
+All parameters live under the `polka` namespace. [config/example_params.yaml](config/example_params.yaml) is a minimal starter; see [config/detailed_params.yaml](config/detailed_params.yaml) for the full annotated reference of every parameter.
 
 ### Minimal Config
 
@@ -313,7 +313,7 @@ graph LR
 polka/
 ├── config/
 │   ├── example_params.yaml          # Minimal starter config
-│   ├── params_reference.yaml        # Full annotated parameter reference
+│   ├── detailed_params.yaml        # Full annotated parameter reference
 │   └── example_articulated_imu.yaml # Per-source IMU deskewing example
 ├── launch/polka.launch.py          # Launch file
 ├── include/polka/

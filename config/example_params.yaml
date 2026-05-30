@@ -1,277 +1,50 @@
 # ============================================================================
-# polka - multi-LiDAR fusion-filter node
+# polka - multi-LiDAR fusion-filter node  (minimal example)
 # ============================================================================
+# Merges multiple LiDAR sources (any mix of PointCloud2 and LaserScan) into a
+# unified PointCloud2 and/or LaserScan.
 #
-# Merges multiple LiDAR sources (any mix of PointCloud2 and LaserScan)
-# into a unified PointCloud2 and/or LaserScan.
-#
-# Quick start:
+# Copy this file and edit for your robot:
 #   1. Set output_frame_id to your robot's base frame
-#   2. List your sensors under source_names
-#   3. Fill in each source's topic and type
-#   4. Enable the outputs you need
-#   5. Launch:  ros2 launch polka polka.launch.py
+#   2. List your sensors under source_names and fill in each topic / type
+#   3. Launch:  ros2 launch polka polka.launch.py config_file:=<your>.yaml
 #
 # Each source needs a valid TF from its frame_id -> output_frame_id.
+# Every parameter (per-source/output filters, IMU deskewing, QoS, per-point
+# timestamps, ...) is documented in config/params_reference.yaml.
 # ============================================================================
 
 polka:
   ros__parameters:
 
-    # --------------------------------------------------
-    # General
-    # --------------------------------------------------
-
     output_frame_id: "base_link"     # all points are transformed into this frame
     output_rate: 20.0                # Hz - merged output publish rate
-    source_timeout: 0.5              # seconds - drop source if no data within this window
-    enable_gpu: true                 # use CUDA GPU pipeline when available (falls back to CPU)
-    timestamp_strategy: "earliest"   # "earliest" | "latest" | "average" | "local"
-    max_source_spread_warn: 0.05     # seconds - warn if source timestamps differ by more
-
-    # --------------------------------------------------
-    # Motion Compensation (IMU-based deskewing)
-    # --------------------------------------------------
-    # Corrects for robot motion during LiDAR scans using IMU data.
-    # Per-point deskewing uses per-point timestamps from the LiDAR driver
-    # and the SE(3) exponential map motion model (angular velocity + acceleration).
-    # Inter-source alignment corrects for timing offsets between different sensors.
-    # Motion model inspired by rko_lio (Malladi et al., 2025, arXiv:2509.06593).
-
-    motion_compensation:
-      enabled: false
-      imu_topic: ""                  # sensor_msgs/Imu topic (empty = disabled)
-      imu_frame: ""                  # If empty use header.frame_id
-      max_imu_age: 0.2               # seconds - reject stale IMU data
-      imu_buffer_size: 200           # ring buffer capacity (~1s at 200Hz)
-      per_point_deskew: true         # per-point correction within each scan
-                                     # requires per-point timestamps in PointCloud2
-                                     # (auto-detects 'time', 't', 'timestamp', etc.)
-      deskew_timestamp_field: "auto" # "auto" or specific field name (e.g. "time")
-
-    # --------------------------------------------------
-    # Outputs
-    # --------------------------------------------------
+    enable_gpu: true                 # use CUDA when available (falls back to CPU)
 
     outputs:
-
-      # === Merged PointCloud2 ===
       cloud:
         enabled: true
         topic: "~/merged_cloud"
-
-        # QoS profile for the published PointCloud2
-        qos:
-          reliability: "reliable"             # "best_effort" or "reliable"
-          durability: "volatile"              # "volatile" or "transient_local"
-          history_depth: 10                   # keep-last queue depth
-          liveliness: "automatic"             # "automatic", "manual_by_node", or "manual_by_topic"
-          liveliness_lease_duration_ms: 0.0   # milliseconds (0 = infinite/system default)
-          deadline_ms: 0.0                    # milliseconds (0 = infinite/no deadline)
-          lifespan_ms: 0.0                    # milliseconds (0 = infinite/no expiry)
-
-        # Post-merge filters (applied to the merged cloud before publishing)
-        # All filters are independent and applied in this order:
-        #   range -> angular -> box -> height filter -> footprint filter -> voxel
-        filters:
-
-          # Range filter - keep points within a spherical distance from the origin
-          range:
-            enabled: false
-            min: 0.1                 # meters - minimum distance
-            max: 30.0                # meters - maximum distance
-
-          # Angular filter - keep or exclude points by horizontal angle (yaw)
-          # Angles are in degrees, measured counter-clockwise from +X axis (0 = forward)
-          # Ranges are [start, end] pairs; multiple pairs can be specified
-          angular:
-            enabled: false
-            invert: false            # false = KEEP listed ranges, true = EXCLUDE them
-            ranges: [0.0, 360.0]     # degrees - pairs of [start, end]
-
-          # Box filter - keep points within an axis-aligned bounding box
-          box:
-            enabled: false
-            x_min: -20.0             # meters (behind / forward)
-            x_max:  20.0
-            y_min: -20.0             # meters (right / left)
-            y_max:  20.0
-            z_min:  -2.0             # meters (below / above)
-            z_max:   5.0
-
-        # Height filter - clip the output cloud to a z-range (in output frame)
-        # Useful for removing ground and overhead points
-        height_cap:
-          enabled: false
-          z_min: -1.0                # meters - lowest point to keep
-          z_max:  3.0                # meters - highest point to keep
-
-        # Footprint filter - remove points that hit the robot body
-        # Define one or more axis-aligned exclusion boxes (in output frame).
-        # Any point inside ANY box is removed. Name each box in box_names
-        # and define its bounds below.
-        self_filter:
-          enabled: false
-          box_names: ["chassis", "sensor_mast"]
-          chassis:                   # main robot body
-            x_min: -0.30
-            x_max:  0.30
-            y_min: -0.25
-            y_max:  0.25
-            z_min: -0.10
-            z_max:  0.50
-          sensor_mast:               # vertical pole holding sensors
-            x_min: -0.05
-            x_max:  0.05
-            y_min: -0.05
-            y_max:  0.05
-            z_min:  0.50
-            z_max:  1.20
-
-        # Voxel downsampling - reduce point density uniformly
-        # Set leaf_size for uniform voxels, or leaf_x/y/z for per-axis control
-        voxel:
-          enabled: false
-          leaf_size: 0.05            # meters - uniform voxel size
-          # leaf_x: 0.05             # per-axis overrides (take priority over leaf_size)
-          # leaf_y: 0.05
-          # leaf_z: 0.10
-
-      # === Merged LaserScan ===
-      # Flattens the merged 3D cloud into a 2D scan (closest point per angular bin)
-      scan:
+      scan:                          # flattens the merged cloud into a 2D scan
         enabled: true
         topic: "~/merged_scan"
-
-        # QoS profile for the published LaserScan
-        qos:
-          reliability: "reliable"
-          durability: "volatile"
-          history_depth: 10
-          liveliness: "automatic"
-          liveliness_lease_duration_ms: 0.0
-          deadline_ms: 0.0
-          lifespan_ms: 0.0
-
-        z_min: -0.10                 # meters - bottom of horizontal slice
-        z_max:  0.50                 # meters - top of horizontal slice
-        angle_min: -3.14159265       # radians - scan start angle (full 360)
-        angle_max:  3.14159265       # radians - scan end angle
-        angle_increment: 0.00436332  # radians per bin (0.25 degrees = 1440 bins)
-        range_min: 0.10              # meters - minimum valid range
-        range_max: 30.0              # meters - maximum valid range
-
-    # --------------------------------------------------
-    # Sources
-    # --------------------------------------------------
-    # Each source is an independent LiDAR input.
-    #   type: "pointcloud2" (3D LiDAR) or "laserscan" (2D LiDAR)
-    #
-    # Per-source filters run BEFORE merging, in each sensor's own frame.
-    # This lets you crop irrelevant data early (less work for the merge step).
-    # Available per-source filters: range, angular, box
-    # (same parameters as the output filters above)
+        z_min: -0.10                 # meters - bottom of the horizontal slice
+        z_max:  0.50                 # meters - top of the horizontal slice
 
     source_names: ["front_3d", "rear_2d"]
 
     sources:
 
-      # --- 3D LiDAR (PointCloud2) ---
+      # 3D LiDAR (PointCloud2)
       front_3d:
         topic: "/front_lidar/points"
         type: "pointcloud2"
-        # imu_topic: "/front_lidar/imu" # per-source IMU override (empty or omitted = use global)
-                                        # useful for articulated platforms where each LiDAR
-                                        # has its own IMU; global IMU recommended for rigid platforms
-        qos_reliability: "best_effort"   # "best_effort" or "reliable"
+        qos_reliability: "best_effort"
         qos_history_depth: 1
-        filters:
-          # Drop self-reflections too close to the sensor
-          range:
-            enabled: true
-            min: 0.30                # meters - ignore returns within 30 cm
-            max: 25.0
-          # Keep only the front 180 degrees
-          angular:
-            enabled: true
-            invert: false
-            ranges: [270.0, 90.0]    # wraps around 0 to cover front hemisphere
-          # Not using box filter on this source
-          box:
-            enabled: false
 
-      # --- 2D LiDAR (LaserScan, auto-converted to PointCloud2) ---
+      # 2D LiDAR (LaserScan, auto-converted to PointCloud2)
       rear_2d:
         topic: "/rear_lidar/scan"
         type: "laserscan"
-        # imu_topic: ""                  # falls back to motion_compensation.imu_topic
         qos_reliability: "best_effort"
         qos_history_depth: 1
-        filters:
-          # Tighter range for the rear sensor
-          range:
-            enabled: true
-            min: 0.20
-            max: 15.0
-          # Keep only the rear 180 degrees
-          angular:
-            enabled: true
-            invert: false
-            ranges: [90.0, 270.0]    # rear hemisphere
-          # Example: crop to a box behind the robot (disabled here)
-          box:
-            enabled: false
-            # x_min: -5.0
-            # x_max:  0.0
-            # y_min: -3.0
-            # y_max:  3.0
-            # z_min: -1.0
-            # z_max:  2.0
-
-# ============================================================================
-# Alternate example: articulated platform with per-source IMU deskewing
-# ----------------------------------------------------------------------------
-# Use this layout when one LiDAR moves relative to the rest of the robot
-# (rotating turret, actuated mast, pan-tilt head, hinged trailer, etc.).
-# Each moving sensor needs its own IMU rigidly bolted to the moving body;
-# fixed sensors share the platform IMU via motion_compensation.imu_topic.
-#
-# TF requirement: robot_state_publisher must publish a live transform from
-# each IMU frame to its sensor frame (dynamic is fine - e.g. from a joint
-# state publisher reading the turret encoder). polka uses that transform
-# to rotate angular velocity and linear acceleration into the sensor frame
-# before deskewing.
-# ============================================================================
-#
-# polka:
-#   ros__parameters:
-#     output_frame_id: "base_link"
-#     output_rate: 20.0
-#     timestamp_strategy: "latest"
-#
-#     motion_compensation:
-#       enabled: true
-#       imu_topic: "/imu/data"          # global / fallback IMU (chassis)
-#       imu_frame: ""                   # empty => use msg.header.frame_id
-#       max_imu_age: 0.2
-#       imu_buffer_size: 200
-#       per_point_deskew: true
-#       deskew_timestamp_field: "auto"  # auto-detects time/t/timestamp/...
-#
-#     source_names: ["turret_lidar", "chassis_lidar"]
-#
-#     sources:
-#       # Rotating turret: uses its OWN IMU (bolted to the turret body).
-#       turret_lidar:
-#         topic: "/turret/points"
-#         type: "pointcloud2"
-#         imu_topic: "/turret/imu/data" # per-source override
-#         qos_reliability: "best_effort"
-#         qos_history_depth: 1
-#
-#       # Fixed chassis LiDAR: no override => uses global /imu/data.
-#       chassis_lidar:
-#         topic: "/chassis/points"
-#         type: "pointcloud2"
-#         qos_reliability: "best_effort"
-#         qos_history_depth: 1

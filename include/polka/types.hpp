@@ -27,11 +27,39 @@
 
 namespace polka {
 
-using PointT = pcl::PointXYZI;
+// Point with a per-point acquisition timestamp.
+//
+// Internally 'time' holds absolute seconds since the Unix epoch: this is the
+// common reference that lets points from sources with different scan-start times
+// be merged consistently. float64 is required - a float32 cannot represent
+// ~1.7e9 s at sub-millisecond resolution. Sources that publish a relative
+// per-point offset are rebased to absolute in SourceAdapter; sources without a
+// per-point time field fall back to the message header stamp for every point.
+// At publish time, with point_timestamps.mode = OFFSET, PolkaNode::rebase_point_time
+// converts 'time' to an offset relative to the merged cloud header (the convention
+// deskewing consumers expect); with mode = ABSOLUTE it is emitted unchanged.
+struct EIGEN_ALIGN16 PointXYZIT {
+  PCL_ADD_POINT4D;       // adds float x, y, z (+ padding) as a SSE-aligned block
+  float intensity;
+  double time;
+  PCL_MAKE_ALIGNED_OPERATOR_NEW
+};
+
+using PointT = PointXYZIT;
 using CloudT = pcl::PointCloud<PointT>;
 
 enum class SourceType { POINTCLOUD2, LASERSCAN };
 enum class TimestampStrategy { EARLIEST, LATEST, AVERAGE, LOCAL };
+
+// How the per-point 'time' field is emitted on the output cloud (when enabled).
+//   OFFSET   - seconds relative to the output cloud header stamp (GLIM/deskew convention)
+//   ABSOLUTE - raw Unix seconds, as received from the source LiDAR
+enum class PerPointTimeMode { OFFSET, ABSOLUTE };
+
+struct PerPointTimeConfig {
+  bool enabled = false;                          // emit a per-point 'time' field
+  PerPointTimeMode mode = PerPointTimeMode::OFFSET;
+};
 
 struct FilterParams {
   double min_range = 0.0;
@@ -179,6 +207,12 @@ struct MergeConfig {
   TimestampStrategy timestamp_strategy = TimestampStrategy::EARLIEST;
   double max_source_spread_warn = 0.05;
 
+  PerPointTimeConfig point_timestamps;
+  // Skip publishing a cloud whose output stamp equals the previous one (and never
+  // re-publish the last cloud when no source is fresh). Prevents downstream SLAM
+  // (e.g. GLIM) from seeing two scans with an identical header.stamp.
+  bool suppress_duplicate_timestamps = true;
+
   MotionCompensationConfig motion_compensation;
 
   CloudOutputConfig cloud_output;
@@ -187,5 +221,13 @@ struct MergeConfig {
 };
 
 }  // namespace polka
+
+POINT_CLOUD_REGISTER_POINT_STRUCT(
+  polka::PointXYZIT,
+  (float, x, x)
+  (float, y, y)
+  (float, z, z)
+  (float, intensity, intensity)
+  (double, time, time))
 
 #endif  // POLKA__TYPES_HPP

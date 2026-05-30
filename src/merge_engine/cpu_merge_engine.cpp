@@ -38,6 +38,7 @@ CloudT::Ptr CpuMergeEngine::merge(const std::vector<MergeInput> & sources)
       o.y = out.y();
       o.z = out.z();
       o.intensity = p.intensity;
+      o.time = p.time;  // absolute acquisition time is invariant under the rigid transform
     }
   }
 

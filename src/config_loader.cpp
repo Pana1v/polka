@@ -33,6 +33,11 @@ void ConfigLoader::declare_defaults()
   node_->declare_parameter<std::string>("timestamp_strategy", "earliest");
   node_->declare_parameter<double>("max_source_spread_warn", 0.05);
 
+  // per-point timestamp passthrough
+  node_->declare_parameter<bool>("point_timestamps.enabled", false);
+  node_->declare_parameter<std::string>("point_timestamps.mode", "offset");
+  node_->declare_parameter<bool>("suppress_duplicate_timestamps", true);
+
   // motion compensation (IMU-based deskewing)
   node_->declare_parameter<bool>("motion_compensation.enabled", false);
   node_->declare_parameter<std::string>("motion_compensation.imu_topic", "");
@@ -166,6 +171,14 @@ MergeConfig ConfigLoader::read_common_params()
   else if (ts_str == "average") cfg.timestamp_strategy = TimestampStrategy::AVERAGE;
   else if (ts_str == "local") cfg.timestamp_strategy = TimestampStrategy::LOCAL;
   else throw std::runtime_error("polka: invalid timestamp_strategy '" + ts_str + "'");
+
+  cfg.point_timestamps.enabled = node_->get_parameter("point_timestamps.enabled").as_bool();
+  auto ppt_mode = node_->get_parameter("point_timestamps.mode").as_string();
+  if (ppt_mode == "offset") cfg.point_timestamps.mode = PerPointTimeMode::OFFSET;
+  else if (ppt_mode == "absolute") cfg.point_timestamps.mode = PerPointTimeMode::ABSOLUTE;
+  else throw std::runtime_error("polka: invalid point_timestamps.mode '" + ppt_mode + "'");
+  cfg.suppress_duplicate_timestamps =
+    node_->get_parameter("suppress_duplicate_timestamps").as_bool();
 
   cfg.motion_compensation.enabled =
     node_->get_parameter("motion_compensation.enabled").as_bool();

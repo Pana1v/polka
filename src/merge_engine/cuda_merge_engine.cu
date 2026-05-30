@@ -71,7 +71,9 @@ __device__ bool pass_box(float4 p, const GpuFilterParams & f) {
 
 __global__ void fused_transform_filter_kernel(
   const float4 * __restrict__ input,
+  const double * __restrict__ input_time,
   float4 * __restrict__ output,
+  double * __restrict__ output_time,
   int * __restrict__ output_count,
   const float * __restrict__ tf,
   GpuFilterParams filter,
@@ -85,6 +87,7 @@ __global__ void fused_transform_filter_kernel(
   int idx = blockIdx.x * blockDim.x + threadIdx.x;
 
   float4 out_point;
+  double out_time = 0.0;
   bool keep = false;
 
   if (idx < n_points) {
@@ -97,6 +100,7 @@ __global__ void fused_transform_filter_kernel(
         float oy = tf[4]*p.x + tf[5]*p.y + tf[6]*p.z  + tf[7];
         float oz = tf[8]*p.x + tf[9]*p.y + tf[10]*p.z + tf[11];
         out_point = make_float4(ox, oy, oz, p.w);
+        out_time = input_time[idx];  // time is invariant under the rigid transform
         keep = true;
       }
     }
@@ -110,12 +114,17 @@ __global__ void fused_transform_filter_kernel(
     output_base = atomicAdd(output_count, local_count);
   __syncthreads();
 
-  if (keep) output[output_base + local_idx] = out_point;
+  if (keep) {
+    output[output_base + local_idx] = out_point;
+    output_time[output_base + local_idx] = out_time;
+  }
 }
 
 __global__ void output_filter_kernel(
   const float4 * __restrict__ input,
+  const double * __restrict__ input_time,
   float4 * __restrict__ output,
+  double * __restrict__ output_time,
   int * __restrict__ output_count,
   GpuOutputFilterParams params,
   int n_points)
@@ -128,6 +137,7 @@ __global__ void output_filter_kernel(
   int idx = blockIdx.x * blockDim.x + threadIdx.x;
 
   float4 p_out;
+  double t_out = 0.0;
   bool keep = false;
 
   if (idx < n_points) {
@@ -176,7 +186,7 @@ __global__ void output_filter_kernel(
       if (params.angular_invert ? match : !match) keep = false;
     }
 
-    if (keep) p_out = p;
+    if (keep) { p_out = p; t_out = input_time[idx]; }
   }
 
   int local_idx = 0;
@@ -187,13 +197,18 @@ __global__ void output_filter_kernel(
     output_base = atomicAdd(output_count, local_count);
   __syncthreads();
 
-  if (keep) output[output_base + local_idx] = p_out;
+  if (keep) {
+    output[output_base + local_idx] = p_out;
+    output_time[output_base + local_idx] = t_out;
+  }
 }
 
 __global__ void voxel_insert_kernel(
   const float4 * __restrict__ points,
+  const double * __restrict__ point_time,
   int * __restrict__ voxel_keys,
   float4 * __restrict__ voxel_points,
+  double * __restrict__ voxel_time,
   float inv_lx, float inv_ly, float inv_lz,
   int n_points)
 {
@@ -219,6 +234,7 @@ __global__ void voxel_insert_kernel(
     int old = atomicCAS(&voxel_keys[s], 0, key);
     if (old == 0) {
       voxel_points[s] = p;
+      voxel_time[s] = point_time[idx];  // representative time = first point claiming the voxel
       return;
     }
     if (old == key) return;
@@ -228,7 +244,9 @@ __global__ void voxel_insert_kernel(
 __global__ void voxel_compact_kernel(
   const int * __restrict__ voxel_keys,
   const float4 * __restrict__ voxel_points,
+  const double * __restrict__ voxel_time,
   float4 * __restrict__ output,
+  double * __restrict__ output_time,
   int * __restrict__ output_count)
 {
   int idx = blockIdx.x * blockDim.x + threadIdx.x;
@@ -237,6 +255,7 @@ __global__ void voxel_compact_kernel(
   if (voxel_keys[idx] != 0) {
     int slot = atomicAdd(output_count, 1);
     output[slot] = voxel_points[idx];
+    output_time[slot] = voxel_time[idx];
   }
 }
 
@@ -285,11 +304,14 @@ struct CudaMergeEngine::Impl {
 
   float4 * d_buf_a = nullptr;
   float4 * d_buf_b = nullptr;
+  double * d_time_a = nullptr;   // per-point time, parallel to d_buf_a
+  double * d_time_b = nullptr;   // per-point time, parallel to d_buf_b
   int * d_count_a = nullptr;
   int * d_count_b = nullptr;
   float * d_tf = nullptr;
   int * d_voxel_keys = nullptr;
   float4 * d_voxel_points = nullptr;
+  double * d_voxel_time = nullptr;   // per-voxel time, parallel to d_voxel_points
   int * d_scan_ranges_int = nullptr;
   float * d_scan_ranges_float = nullptr;
 
@@ -397,12 +419,15 @@ CudaMergeEngine::CudaMergeEngine(const MergeConfig & config)
 
   POLKA_CUDA_CHECK(cudaMalloc(&impl_->d_buf_a, impl_->max_total_points * sizeof(float4)));
   POLKA_CUDA_CHECK(cudaMalloc(&impl_->d_buf_b, impl_->max_total_points * sizeof(float4)));
+  POLKA_CUDA_CHECK(cudaMalloc(&impl_->d_time_a, impl_->max_total_points * sizeof(double)));
+  POLKA_CUDA_CHECK(cudaMalloc(&impl_->d_time_b, impl_->max_total_points * sizeof(double)));
   POLKA_CUDA_CHECK(cudaMalloc(&impl_->d_count_a, sizeof(int)));
   POLKA_CUDA_CHECK(cudaMalloc(&impl_->d_count_b, sizeof(int)));
   POLKA_CUDA_CHECK(cudaMalloc(&impl_->d_tf, 16 * sizeof(float)));
 
   POLKA_CUDA_CHECK(cudaMalloc(&impl_->d_voxel_keys, POLKA_VOXEL_TABLE_SIZE * sizeof(int)));
   POLKA_CUDA_CHECK(cudaMalloc(&impl_->d_voxel_points, POLKA_VOXEL_TABLE_SIZE * sizeof(float4)));
+  POLKA_CUDA_CHECK(cudaMalloc(&impl_->d_voxel_time, POLKA_VOXEL_TABLE_SIZE * sizeof(double)));
 
   POLKA_CUDA_CHECK(cudaMalloc(&impl_->d_scan_ranges_int, POLKA_MAX_SCAN_BINS * sizeof(int)));
   POLKA_CUDA_CHECK(cudaMalloc(&impl_->d_scan_ranges_float, POLKA_MAX_SCAN_BINS * sizeof(float)));
@@ -414,11 +439,14 @@ CudaMergeEngine::~CudaMergeEngine()
 {
   cudaFree(impl_->d_buf_a);
   cudaFree(impl_->d_buf_b);
+  cudaFree(impl_->d_time_a);
+  cudaFree(impl_->d_time_b);
   cudaFree(impl_->d_count_a);
   cudaFree(impl_->d_count_b);
   cudaFree(impl_->d_tf);
   cudaFree(impl_->d_voxel_keys);
   cudaFree(impl_->d_voxel_points);
+  cudaFree(impl_->d_voxel_time);
   cudaFree(impl_->d_scan_ranges_int);
   cudaFree(impl_->d_scan_ranges_float);
   cudaStreamDestroy(impl_->stream);
@@ -439,12 +467,16 @@ CloudT::Ptr CudaMergeEngine::merge(const std::vector<MergeInput> & sources)
     size_t n = std::min(src.cloud->size(), impl_->max_points_per_source);
 
     std::vector<float4> packed(n);
+    std::vector<double> packed_time(n);
     for (size_t i = 0; i < n; ++i) {
       const auto & pt = src.cloud->points[i];
       packed[i] = make_float4(pt.x, pt.y, pt.z, pt.intensity);
+      packed_time[i] = pt.time;
     }
     POLKA_CUDA_CHECK(cudaMemcpyAsync(impl_->d_buf_a + input_offset, packed.data(),
       n * sizeof(float4), cudaMemcpyHostToDevice, s));
+    POLKA_CUDA_CHECK(cudaMemcpyAsync(impl_->d_time_a + input_offset, packed_time.data(),
+      n * sizeof(double), cudaMemcpyHostToDevice, s));
 
     Eigen::Matrix4f mat = src.transform.cast<float>().matrix();
     float tf[16];
@@ -456,7 +488,8 @@ CloudT::Ptr CudaMergeEngine::merge(const std::vector<MergeInput> & sources)
     GpuFilterParams gf = impl_->to_gpu_filter(src.filter_params);
     int blocks = (static_cast<int>(n) + 255) / 256;
     fused_transform_filter_kernel<<<blocks, 256, 0, s>>>(
-      impl_->d_buf_a + input_offset, impl_->d_buf_b, impl_->d_count_b,
+      impl_->d_buf_a + input_offset, impl_->d_time_a + input_offset,
+      impl_->d_buf_b, impl_->d_time_b, impl_->d_count_b,
       impl_->d_tf, gf, static_cast<int>(n));
     POLKA_CUDA_CHECK_KERNEL();
 
@@ -471,13 +504,16 @@ CloudT::Ptr CudaMergeEngine::merge(const std::vector<MergeInput> & sources)
   if (count > 0) {
     output->resize(count);
     std::vector<float4> packed_out(count);
+    std::vector<double> packed_time_out(count);
     POLKA_CUDA_CHECK(cudaMemcpy(packed_out.data(), impl_->d_buf_b, count * sizeof(float4), cudaMemcpyDeviceToHost));
+    POLKA_CUDA_CHECK(cudaMemcpy(packed_time_out.data(), impl_->d_time_b, count * sizeof(double), cudaMemcpyDeviceToHost));
     for (int i = 0; i < count; ++i) {
       auto & pt = output->points[i];
       pt.x = packed_out[i].x;
       pt.y = packed_out[i].y;
       pt.z = packed_out[i].z;
       pt.intensity = packed_out[i].w;
+      pt.time = packed_time_out[i];
     }
   }
   output->width = count;
@@ -503,12 +539,16 @@ PipelineResult CudaMergeEngine::merge_pipeline(
     size_t n = std::min(src.cloud->size(), impl_->max_points_per_source);
 
     std::vector<float4> packed(n);
+    std::vector<double> packed_time(n);
     for (size_t i = 0; i < n; ++i) {
       const auto & pt = src.cloud->points[i];
       packed[i] = make_float4(pt.x, pt.y, pt.z, pt.intensity);
+      packed_time[i] = pt.time;
     }
     POLKA_CUDA_CHECK(cudaMemcpyAsync(impl_->d_buf_a + input_offset, packed.data(),
       n * sizeof(float4), cudaMemcpyHostToDevice, s));
+    POLKA_CUDA_CHECK(cudaMemcpyAsync(impl_->d_time_a + input_offset, packed_time.data(),
+      n * sizeof(double), cudaMemcpyHostToDevice, s));
 
     Eigen::Matrix4f mat = src.transform.cast<float>().matrix();
     float tf[16];
@@ -520,7 +560,8 @@ PipelineResult CudaMergeEngine::merge_pipeline(
     GpuFilterParams gf = impl_->to_gpu_filter(src.filter_params);
     int blocks = (static_cast<int>(n) + 255) / 256;
     fused_transform_filter_kernel<<<blocks, 256, 0, s>>>(
-      impl_->d_buf_a + input_offset, impl_->d_buf_b, impl_->d_count_b,
+      impl_->d_buf_a + input_offset, impl_->d_time_a + input_offset,
+      impl_->d_buf_b, impl_->d_time_b, impl_->d_count_b,
       impl_->d_tf, gf, static_cast<int>(n));
     POLKA_CUDA_CHECK_KERNEL();
 
@@ -534,6 +575,7 @@ PipelineResult CudaMergeEngine::merge_pipeline(
   if (merge_count <= 0) return {std::make_shared<CloudT>(), {}};
 
   float4 * cur_data = impl_->d_buf_b;
+  double * cur_time = impl_->d_time_b;   // time buffer parallel to cur_data
   int cur_count = merge_count;
 
   GpuOutputFilterParams ofp = impl_->to_gpu_output_filter(config);
@@ -544,13 +586,15 @@ PipelineResult CudaMergeEngine::merge_pipeline(
     POLKA_CUDA_CHECK(cudaMemsetAsync(impl_->d_count_a, 0, sizeof(int), s));
     int blocks = (cur_count + 255) / 256;
     output_filter_kernel<<<blocks, 256, 0, s>>>(
-      impl_->d_buf_b, impl_->d_buf_a, impl_->d_count_a, ofp, cur_count);
+      impl_->d_buf_b, impl_->d_time_b, impl_->d_buf_a, impl_->d_time_a,
+      impl_->d_count_a, ofp, cur_count);
     POLKA_CUDA_CHECK_KERNEL();
 
     POLKA_CUDA_CHECK(cudaMemcpyAsync(&cur_count, impl_->d_count_a, sizeof(int), cudaMemcpyDeviceToHost, s));
     POLKA_CUDA_CHECK(cudaStreamSynchronize(s));
 
     cur_data = impl_->d_buf_a;
+    cur_time = impl_->d_time_a;
     if (cur_count <= 0) return {std::make_shared<CloudT>(), {}};
   }
 
@@ -564,24 +608,26 @@ PipelineResult CudaMergeEngine::merge_pipeline(
 
     int blocks = (cur_count + 255) / 256;
     voxel_insert_kernel<<<blocks, 256, 0, s>>>(
-      cur_data, impl_->d_voxel_keys, impl_->d_voxel_points,
+      cur_data, cur_time, impl_->d_voxel_keys, impl_->d_voxel_points, impl_->d_voxel_time,
       inv_lx, inv_ly, inv_lz, cur_count);
     POLKA_CUDA_CHECK_KERNEL();
 
     float4 * voxel_out = (cur_data == impl_->d_buf_a) ? impl_->d_buf_b : impl_->d_buf_a;
+    double * voxel_time_out = (cur_data == impl_->d_buf_a) ? impl_->d_time_b : impl_->d_time_a;
     int * voxel_cnt = (cur_data == impl_->d_buf_a) ? impl_->d_count_b : impl_->d_count_a;
 
     POLKA_CUDA_CHECK(cudaMemsetAsync(voxel_cnt, 0, sizeof(int), s));
     int compact_blocks = (POLKA_VOXEL_TABLE_SIZE + 255) / 256;
     voxel_compact_kernel<<<compact_blocks, 256, 0, s>>>(
-      impl_->d_voxel_keys, impl_->d_voxel_points,
-      voxel_out, voxel_cnt);
+      impl_->d_voxel_keys, impl_->d_voxel_points, impl_->d_voxel_time,
+      voxel_out, voxel_time_out, voxel_cnt);
     POLKA_CUDA_CHECK_KERNEL();
 
     POLKA_CUDA_CHECK(cudaMemcpyAsync(&cur_count, voxel_cnt, sizeof(int), cudaMemcpyDeviceToHost, s));
     POLKA_CUDA_CHECK(cudaStreamSynchronize(s));
 
     cur_data = voxel_out;
+    cur_time = voxel_time_out;
     if (cur_count <= 0) return {std::make_shared<CloudT>(), {}};
   }
 
@@ -612,10 +658,14 @@ PipelineResult CudaMergeEngine::merge_pipeline(
 
   auto output = std::make_shared<CloudT>();
   std::vector<float4> packed_out;
+  std::vector<double> packed_time_out;
   if (cur_count > 0) {
     packed_out.resize(cur_count);
+    packed_time_out.resize(cur_count);
     POLKA_CUDA_CHECK(cudaMemcpyAsync(packed_out.data(), cur_data,
       cur_count * sizeof(float4), cudaMemcpyDeviceToHost, s));
+    POLKA_CUDA_CHECK(cudaMemcpyAsync(packed_time_out.data(), cur_time,
+      cur_count * sizeof(double), cudaMemcpyDeviceToHost, s));
   }
 
   if (config.scan_enabled && !scan_ranges.empty()) {
@@ -633,6 +683,7 @@ PipelineResult CudaMergeEngine::merge_pipeline(
       pt.y = packed_out[i].y;
       pt.z = packed_out[i].z;
       pt.intensity = packed_out[i].w;
+      pt.time = packed_time_out[i];
     }
   }
   output->width = static_cast<uint32_t>(cur_count);

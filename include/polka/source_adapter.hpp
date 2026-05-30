@@ -64,6 +64,8 @@ private:
   // Per-point deskewing
   void detect_timestamp_field(const sensor_msgs::msg::PointCloud2 & msg);
   double extract_point_time(const uint8_t * point_data) const;
+  // Fill each point's 'time' field with its absolute acquisition time (Unix sec).
+  void populate_point_time(CloudT & cloud, const sensor_msgs::msg::PointCloud2 & raw_msg);
   void deskew_cloud(CloudT & cloud, const sensor_msgs::msg::PointCloud2 & raw_msg,
                     const AveragedImu & imu);
 

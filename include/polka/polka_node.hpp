@@ -51,6 +51,9 @@ private:
   bool reconfigure();
   void voxel_downsample(CloudT & cloud);
   void height_cap(CloudT & cloud);
+  // Convert each point's absolute Unix 'time' to a relative offset (seconds) from
+  // the output header stamp, the convention deskewing consumers (e.g. GLIM) expect.
+  void rebase_point_time(CloudT & cloud, const rclcpp::Time & stamp);
   void log_startup_banner() const;
 
   // IMU-based motion compensation (global)

@@ -28,7 +28,12 @@
 #endif
 
 #include <pcl_conversions/pcl_conversions.h>
+#include <pcl/console/print.h>
 #include <pcl/filters/voxel_grid.h>
+// PointXYZIT is a custom point type, so VoxelGrid/PCLBase are not pre-instantiated
+// in libpcl; pull in the template implementations to instantiate them here.
+#include <pcl/impl/pcl_base.hpp>
+#include <pcl/filters/impl/voxel_grid.hpp>
 #include <tf2_eigen/tf2_eigen.hpp>
 
 #include <rcl_interfaces/msg/set_parameters_result.hpp>
@@ -82,6 +87,12 @@ rclcpp::QoS build_qos(const OutputQosConfig & cfg)
 PolkaNode::PolkaNode(const rclcpp::NodeOptions & options)
 : rclcpp::Node("polka", options), config_loader_(this)
 {
+  // Our point type carries a 'time' field that source clouds usually lack (they
+  // publish 'timestamp' or nothing), so pcl::fromROSMsg logs a per-message
+  // "Failed to find match for field 'time'" warning. populate_point_time fills it
+  // explicitly, so silence PCL's redundant warnings (errors still surface).
+  pcl::console::setVerbosityLevel(pcl::console::L_ERROR);
+
   config_ = config_loader_.load();
 
   tf_buffer_ = std::make_shared<tf2_ros::Buffer>(this->get_clock());
@@ -261,25 +272,12 @@ void PolkaNode::output_callback()
 
   bool has_fresh_data = !source_data.empty();
   if (!has_fresh_data) {
-    std::lock_guard<std::mutex> lock(last_data_mutex_);
-    if (last_cloud_ && !last_cloud_->empty()) {
-      if (cloud_pub_) {
-        sensor_msgs::msg::PointCloud2 msg;
-        pcl::toROSMsg(*last_cloud_, msg);
-        msg.header.frame_id = config_.output_frame_id;
-        msg.header.stamp = last_cloud_stamp_;
-        cloud_pub_->publish(msg);
-      }
-      if (scan_pub_) {
-        if (!last_scan_ranges_.empty())
-          publish_scan_from_ranges(last_scan_ranges_, last_cloud_stamp_);
-        else
-          publish_scan(last_cloud_, last_cloud_stamp_);
-      }
-      return;
-    } else {
-      return;
-    }
+    // No source produced a new frame this tick. Re-publishing the last cloud with
+    // its original stamp (the previous behaviour) hands downstream consumers a
+    // duplicate header.stamp; GLIM then sees two scans with zero IMU samples
+    // between them (num_imu=0) and odometry stalls. A genuine gap is safe to emit
+    // nothing for; a duplicate stamp is not. Skip this tick.
+    return;
   }
 
   std::vector<rclcpp::Time> stamps;
@@ -297,6 +295,17 @@ void PolkaNode::output_callback()
   }
 
   auto output_stamp = compute_output_stamp(stamps);
+
+  // Drop duplicate-timestamp output: a source can still be within source_timeout
+  // ("fresh") yet not have advanced since the last tick, so the LATEST stamp
+  // repeats. Emitting it would give downstream SLAM two scans with an identical
+  // header.stamp and no IMU between them. Skip until the stamp actually moves.
+  {
+    std::lock_guard<std::mutex> lock(last_data_mutex_);
+    if (last_cloud_ && output_stamp == last_cloud_stamp_) {
+      return;
+    }
+  }
 
   // Pass 2: Apply IMU-based inter-source compensation and build MergeInputs
   bool do_compensate = false;
@@ -330,6 +339,7 @@ void PolkaNode::output_callback()
     if (!result.cloud || result.cloud->empty()) return;
 
     if (cloud_pub_) {
+      rebase_point_time(*result.cloud, output_stamp);
       publish_cloud(result.cloud, output_stamp);
       std::lock_guard<std::mutex> lock(last_data_mutex_);
       last_cloud_ = result.cloud;
@@ -356,6 +366,7 @@ void PolkaNode::output_callback()
       voxel_downsample(*merged);
 
     if (cloud_pub_) {
+      rebase_point_time(*merged, output_stamp);
       publish_cloud(merged, output_stamp);
       std::lock_guard<std::mutex> lock(last_data_mutex_);
       last_cloud_ = merged;
@@ -470,12 +481,29 @@ void PolkaNode::publish_scan_from_ranges(
 void PolkaNode::voxel_downsample(CloudT & cloud)
 {
   const auto & vc = config_.cloud_output.voxel;
+  // pcl::VoxelGrid averages non-xyz fields through a float centroid, which cannot
+  // hold an absolute Unix 'time' (~1.7e9 s) at sub-millisecond resolution. The GPU
+  // voxel path keeps time exact (it copies a representative point's time). If you
+  // need exact per-point time with CPU voxel downsampling, run with enable_gpu.
+  RCLCPP_WARN_ONCE(get_logger(),
+    "polka: CPU voxel downsampling reduces per-point 'time' precision to float; "
+    "use enable_gpu for exact per-point time");
   pcl::VoxelGrid<PointT> vg;
   vg.setInputCloud(cloud.makeShared());
   vg.setLeafSize(vc.leaf_x, vc.leaf_y, vc.leaf_z);
   CloudT filtered;
   vg.filter(filtered);
   cloud = std::move(filtered);
+}
+
+void PolkaNode::rebase_point_time(CloudT & cloud, const rclcpp::Time & stamp)
+{
+  // Points carry absolute Unix seconds internally; downstream deskewing expects
+  // a per-point offset relative to the cloud header. Subtracting in double keeps
+  // ~sub-microsecond precision even though the absolute values are ~1.7e9.
+  const double base = stamp.seconds();
+  for (auto & p : cloud)
+    p.time -= base;
 }
 
 void PolkaNode::height_cap(CloudT & cloud)

@@ -12,7 +12,7 @@
 # to rotate angular velocity and linear acceleration into the sensor frame
 # before deskewing.
 #
-# See config/params_reference.yaml for every available parameter.
+# See config/detailed_params.yaml for every available parameter.
 # ============================================================================
 
 polka:

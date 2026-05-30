@@ -90,7 +90,7 @@ colcon build --packages-select polka --cmake-args -DWITH_CUDA=ON
 
 ## Configuration
 
-All parameters live under the `polka` namespace. See [config/example_params.yaml](config/example_params.yaml) for the full annotated reference.
+All parameters live under the `polka` namespace. [config/example_params.yaml](config/example_params.yaml) is a minimal starter; see [config/params_reference.yaml](config/params_reference.yaml) for the full annotated reference of every parameter.
 
 ### Minimal Config
 
@@ -170,7 +170,7 @@ sources:
     # imu_topic omitted — falls back to /imu/data
 ```
 
-A working snippet with two sources is appended to [`config/example_params.yaml`](config/example_params.yaml) ("articulated platform" block). The global `motion_compensation.imu_topic` remains the recommended path for fully rigid platforms.
+A working two-source setup is in [`config/example_articulated_imu.yaml`](config/example_articulated_imu.yaml). The global `motion_compensation.imu_topic` remains the recommended path for fully rigid platforms.
 
 **Per-point timestamp auto-detect.** With `deskew_timestamp_field: "auto"` polka scans each `PointCloud2` for one of: `time`, `t`, `timestamp`, `time_stamp`, `offset_time`, `timeStamp`. Set a specific name if your driver uses something else; if no usable field is present polka logs once and falls back to whole-scan (non-per-point) deskewing for that source.
 
@@ -311,7 +311,10 @@ graph LR
 
 ```
 polka/
-├── config/example_params.yaml      # Full annotated config reference
+├── config/
+│   ├── example_params.yaml          # Minimal starter config
+│   ├── params_reference.yaml        # Full annotated parameter reference
+│   └── example_articulated_imu.yaml # Per-source IMU deskewing example
 ├── launch/polka.launch.py          # Launch file
 ├── include/polka/
 │   ├── polka_node.hpp              # Main composable node (orchestration only)

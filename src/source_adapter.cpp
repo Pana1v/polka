@@ -148,6 +148,33 @@ double SourceAdapter::extract_point_time(const uint8_t * point_data) const
   }
 }
 
+void SourceAdapter::populate_point_time(
+  CloudT & cloud,
+  const sensor_msgs::msg::PointCloud2 & raw_msg)
+{
+  const size_t n = cloud.size();
+  const double header_sec = rclcpp::Time(raw_msg.header.stamp).seconds();
+
+  // No per-point field (or layout we cannot index safely): every point inherits
+  // the message header stamp. Same fallback used for projected LaserScan sources.
+  if (!has_timestamp_field_ ||
+      n != static_cast<size_t>(raw_msg.width) * raw_msg.height) {
+    for (size_t i = 0; i < n; ++i)
+      cloud[i].time = header_sec;
+    return;
+  }
+
+  const uint8_t * raw_data = raw_msg.data.data();
+  const uint32_t point_step = raw_msg.point_step;
+
+  for (size_t i = 0; i < n; ++i) {
+    double pt_time = extract_point_time(raw_data + i * point_step);
+    // Interpret like the deskew path: values >1e8 are already absolute Unix
+    // seconds; smaller values are per-point offsets from the scan header stamp.
+    cloud[i].time = (pt_time > 1e8) ? pt_time : (header_sec + pt_time);
+  }
+}
+
 void SourceAdapter::deskew_cloud(
   CloudT & cloud,
   const sensor_msgs::msg::PointCloud2 & raw_msg,
@@ -231,6 +258,10 @@ void SourceAdapter::pc2_callback(sensor_msgs::msg::PointCloud2::ConstSharedPtr m
   auto cloud = std::make_shared<CloudT>();
   pcl::fromROSMsg(*msg, *cloud);
 
+  // Stamp each point with its absolute acquisition time before any filtering,
+  // so the 'time' field survives the same compaction as x/y/z/intensity.
+  populate_point_time(*cloud, *msg);
+
   // Per-point deskewing (before filters, in sensor frame)
   if (deskew_enabled_ && has_timestamp_field_ && get_imu_) {
     auto imu = get_imu_();
@@ -256,6 +287,8 @@ void SourceAdapter::scan_callback(sensor_msgs::msg::LaserScan::ConstSharedPtr ms
 
   auto cloud = std::make_shared<CloudT>();
   pcl::fromROSMsg(pc2_msg, *cloud);
+  // Projected scans carry no per-point time; populate falls back to header stamp.
+  populate_point_time(*cloud, pc2_msg);
   apply_filters(*cloud);
   store_cloud(cloud, msg->header);
 }

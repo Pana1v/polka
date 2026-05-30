@@ -19,6 +19,8 @@
 #include "polka/merge_engine/cpu_merge_engine.hpp"
 
 #include <pcl_conversions/pcl_conversions.h>
+#include <pcl/console/print.h>
+#include <pcl/common/io.h>
 #include <tf2_eigen/tf2_eigen.hpp>
 #include <rcl_interfaces/msg/set_parameters_result.hpp>
 
@@ -38,6 +40,12 @@ namespace polka {
 PolkaNode::PolkaNode(const rclcpp::NodeOptions & options)
 : rclcpp::Node("polka", options), config_loader_(this)
 {
+  // Our point type carries a 'time' field that source clouds usually lack (they
+  // publish 'timestamp' or nothing), so pcl::fromROSMsg logs a per-message
+  // "Failed to find match for field 'time'" warning. populate_point_time fills it
+  // explicitly, so silence PCL's redundant warnings (errors still surface).
+  pcl::console::setVerbosityLevel(pcl::console::L_ERROR);
+
   config_ = config_loader_.load();
 
   tf_buffer_ = std::make_shared<tf2_ros::Buffer>(this->get_clock());
@@ -154,11 +162,15 @@ void PolkaNode::output_callback()
   }
 
   if (source_data.empty()) {
+    // No source produced a new frame this tick. When suppressing duplicates, emit
+    // nothing rather than re-publishing the last cloud with its original stamp: a
+    // duplicate header.stamp hands downstream SLAM (e.g. GLIM) two scans with zero
+    // IMU samples between them and stalls odometry. A genuine gap is safe to skip.
+    if (config_.suppress_duplicate_timestamps) return;
     std::lock_guard<std::mutex> lock(last_data_mutex_);
     if (last_cloud_ && !last_cloud_->empty()) {
       if (cloud_pub_) {
-        sensor_msgs::msg::PointCloud2 msg;
-        pcl::toROSMsg(*last_cloud_, msg);
+        auto msg = to_cloud_msg(*last_cloud_);
         msg.header.frame_id = config_.output_frame_id;
         msg.header.stamp = last_cloud_stamp_;
         cloud_pub_->publish(msg);
@@ -187,6 +199,15 @@ void PolkaNode::output_callback()
   }
 
   auto output_stamp = compute_output_stamp(stamps);
+
+  // Drop duplicate-timestamp output: a source can still be within source_timeout
+  // ("fresh") yet not have advanced since the last tick, so the chosen stamp
+  // repeats. Emitting it would give downstream SLAM two scans with an identical
+  // header.stamp and no IMU between them. Skip until the stamp actually moves.
+  if (config_.suppress_duplicate_timestamps) {
+    std::lock_guard<std::mutex> lock(last_data_mutex_);
+    if (last_cloud_ && output_stamp == last_cloud_stamp_) return;
+  }
 
   bool do_compensate = false;
   AveragedImu imu_for_alignment;
@@ -220,8 +241,10 @@ void PolkaNode::output_callback()
     if (!result.cloud || result.cloud->empty()) return;
 
     if (cloud_pub_) {
-      sensor_msgs::msg::PointCloud2 msg;
-      pcl::toROSMsg(*result.cloud, msg);
+      if (config_.point_timestamps.enabled &&
+          config_.point_timestamps.mode == PerPointTimeMode::OFFSET)
+        rebase_point_time(*result.cloud, output_stamp);
+      auto msg = to_cloud_msg(*result.cloud);
       msg.header.frame_id = config_.output_frame_id;
       msg.header.stamp = output_stamp;
       cloud_pub_->publish(msg);
@@ -241,11 +264,18 @@ void PolkaNode::output_callback()
     auto merged = merge_engine_->merge(inputs);
     if (!merged || merged->empty()) return;
 
+    if (config_.point_timestamps.enabled && config_.cloud_output.voxel.enabled)
+      RCLCPP_WARN_ONCE(get_logger(),
+        "polka: CPU voxel downsampling reduces per-point 'time' precision to float; "
+        "use enable_gpu for exact per-point time");
+
     output_pipeline_.process(*merged, config_.output_frame_id);
 
     if (cloud_pub_) {
-      sensor_msgs::msg::PointCloud2 msg;
-      pcl::toROSMsg(*merged, msg);
+      if (config_.point_timestamps.enabled &&
+          config_.point_timestamps.mode == PerPointTimeMode::OFFSET)
+        rebase_point_time(*merged, output_stamp);
+      auto msg = to_cloud_msg(*merged);
       msg.header.frame_id = config_.output_frame_id;
       msg.header.stamp = output_stamp;
       cloud_pub_->publish(msg);
@@ -280,6 +310,30 @@ rclcpp::Time PolkaNode::compute_output_stamp(const std::vector<rclcpp::Time> & s
     default:
       return this->now();
   }
+}
+
+void PolkaNode::rebase_point_time(CloudT & cloud, const rclcpp::Time & stamp)
+{
+  // Points carry absolute Unix seconds internally; downstream deskewing expects
+  // a per-point offset relative to the cloud header. Subtracting in double keeps
+  // ~sub-microsecond precision even though the absolute values are ~1.7e9.
+  const double base = stamp.seconds();
+  for (auto & p : cloud)
+    p.time -= base;
+}
+
+sensor_msgs::msg::PointCloud2 PolkaNode::to_cloud_msg(const CloudT & cloud) const
+{
+  sensor_msgs::msg::PointCloud2 msg;
+  if (config_.point_timestamps.enabled) {
+    pcl::toROSMsg(cloud, msg);  // includes the float64 'time' field
+  } else {
+    // Legacy output: drop 'time', emit x/y/z/intensity exactly as before.
+    pcl::PointCloud<pcl::PointXYZI> xyzi;
+    pcl::copyPointCloud(cloud, xyzi);
+    pcl::toROSMsg(xyzi, msg);
+  }
+  return msg;
 }
 
 bool PolkaNode::reconfigure()

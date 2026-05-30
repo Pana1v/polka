@@ -44,6 +44,12 @@ public:
 private:
   void output_callback();
   rclcpp::Time compute_output_stamp(const std::vector<rclcpp::Time> & stamps);
+  // Convert each point's absolute Unix 'time' to a relative offset (seconds) from
+  // the output header stamp, the convention deskewing consumers (e.g. GLIM) expect.
+  void rebase_point_time(CloudT & cloud, const rclcpp::Time & stamp);
+  // Serialize the merged cloud to a message, honouring point_timestamps.enabled
+  // (drops the 'time' field when disabled, for a legacy x/y/z/intensity output).
+  sensor_msgs::msg::PointCloud2 to_cloud_msg(const CloudT & cloud) const;
   bool reconfigure();
   void log_startup_banner() const;
 

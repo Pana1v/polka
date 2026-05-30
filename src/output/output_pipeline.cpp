@@ -17,6 +17,10 @@
 #include "polka/filters/box_filter.hpp"
 
 #include <pcl/filters/voxel_grid.h>
+// PointXYZIT is a custom point type, so VoxelGrid/PCLBase are not pre-instantiated
+// in libpcl; pull in the template implementations to instantiate them here.
+#include <pcl/impl/pcl_base.hpp>
+#include <pcl/filters/impl/voxel_grid.hpp>
 
 namespace polka {
 

@@ -7,7 +7,7 @@
 <p align="center">
   <img src="media/pipeline_demo.gif" alt="Polka pipeline stages" width="720"/>
   <br/>
-  <em>Pipeline stages: raw &rarr; deskew &rarr; per-source filter &rarr; merge &rarr; output filter &rarr; voxel &rarr; random_grid &mdash; <a href="media/">regenerate</a></em>
+  <em>Pipeline stages: raw &rarr; deskew &rarr; per-source filter &rarr; merge &rarr; output filter &rarr; voxel &mdash; <a href="media/">regenerate</a></em>
 </p>
 
 **Multi-LiDAR fusion node for ROS 2** that merges any mix of PointCloud2 and LaserScan sources into a unified output, with optional CUDA GPU acceleration.
@@ -44,7 +44,7 @@ Managing multiple LiDAR sensors in ROS 2 typically requires a chain of separate 
 - **Heterogeneous source fusion**: mix 3D PointCloud2 and 2D LaserScan sensors freely
 - **Dual output**: publish merged PointCloud2, LaserScan, or both simultaneously
 - **Per-source filtering**: range, angular, and box filters applied before merge
-- **Output filtering**: range, angular, box, height filter, footprint filter (ego-body exclusion), random-grid downsampling, voxel downsampling
+- **Output filtering**: range, angular, box, height filter, footprint filter (ego-body exclusion), voxel downsampling
 - **IMU-based deskewing**: per-point SE(3) motion correction using IMU angular velocity and acceleration, with auto-detection of per-point timestamp fields
 - **CUDA acceleration**: optional GPU merge engine with fused kernels and pre-allocated buffers
 - **TF2 integration**: automatic transform lookup with fallback to last known good transform
@@ -187,8 +187,7 @@ Applied to the merged cloud before publishing, in this order:
 1. **Output filters** (range / angular / box)
 2. **Footprint filter** -- removes points inside robot body exclusion zones
 3. **Height filter** -- clips to `[z_min, z_max]`
-4. **Random-grid downsample** -- keeps one randomly chosen real point per voxel cell
-5. **Voxel downsample** -- reduces density via VoxelGrid (centroid-per-cell)
+4. **Voxel downsample** -- reduces density via VoxelGrid
 
 ```yaml
 outputs:
@@ -197,10 +196,6 @@ outputs:
       enabled: true
       z_min: -1.0
       z_max: 3.0
-    random_grid:
-      enabled: false
-      leaf_size: 0.05
-      seed: 0                 # 0 = nondeterministic
     voxel:
       enabled: true
       leaf_size: 0.05
@@ -215,8 +210,6 @@ outputs:
         z_min: -0.10
         z_max:  0.50
 ```
-
-`random_grid` preserves actual sensor returns (one real point picked per cell); `voxel` emits a synthetic centroid per cell. Pick one based on whether your downstream consumer needs raw returns.
 
 ## Pipeline Comparison
 
@@ -308,13 +301,12 @@ graph LR
         OF[Range / Angular /<br/>Box Filter]
         FF[Footprint Filter]
         HF[Height Filter]
-        RG[Random Grid<br/>Downsample]
         VX[Voxel Downsample]
     end
 
     PC --> PF1 --> ME
     LS --> PF2 --> ME
-    ME --> OF --> FF --> HF --> RG --> VX
+    ME --> OF --> FF --> HF --> VX
     VX --> OUT_PC[PointCloud2]
     VX --> OUT_LS[LaserScan]
 ```

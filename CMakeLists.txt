@@ -62,10 +62,30 @@ target_include_directories(polka_core PUBLIC
   "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
   "$<INSTALL_INTERFACE:include/${PROJECT_NAME}>"
 )
-ament_target_dependencies(polka_core
-  rclcpp rclcpp_components sensor_msgs
-  tf2_ros tf2_geometry_msgs tf2_eigen pcl_conversions laser_geometry
-)
+# ament_target_dependencies() was deprecated in Kilted and removed in Rolling/Lyrical.
+# Keep the proven macro on distros that still ship it (Humble..Kilted); fall back to
+# modern CMake targets on distros where it no longer exists. This keeps a single
+# CMakeLists.txt building across every supported distro (see MAINTAINING.md).
+if(COMMAND ament_target_dependencies)
+  ament_target_dependencies(polka_core
+    rclcpp rclcpp_components sensor_msgs
+    tf2_ros tf2_geometry_msgs tf2_eigen pcl_conversions laser_geometry
+  )
+else()
+  target_link_libraries(polka_core
+    rclcpp::rclcpp
+    rclcpp_components::component
+    ${sensor_msgs_TARGETS}
+    tf2_ros::tf2_ros
+    ${tf2_geometry_msgs_TARGETS}
+    tf2_eigen::tf2_eigen
+    ${pcl_conversions_TARGETS}
+    laser_geometry::laser_geometry
+  )
+  # pcl_conversions is header-only on some distros and exports no link target;
+  # make sure its headers are on the include path regardless.
+  target_include_directories(polka_core PUBLIC ${pcl_conversions_INCLUDE_DIRS})
+endif()
 target_link_libraries(polka_core ${PCL_LIBRARIES})
 
 if(WITH_CUDA)

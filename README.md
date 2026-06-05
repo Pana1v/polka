@@ -1,8 +1,30 @@
 # POLKA
 
 <p align="center">
+  <a href="https://github.com/Pana1v/polka/tree/humble"><img src="https://img.shields.io/badge/ROS_2-Humble-22314E?logo=ros&logoColor=white" alt="ROS 2 Humble"/></a>
+  <a href="https://github.com/Pana1v/polka/tree/iron"><img src="https://img.shields.io/badge/ROS_2-Iron-22314E?logo=ros&logoColor=white" alt="ROS 2 Iron"/></a>
+  <a href="https://github.com/Pana1v/polka/tree/jazzy"><img src="https://img.shields.io/badge/ROS_2-Jazzy-22314E?logo=ros&logoColor=white" alt="ROS 2 Jazzy"/></a>
+  <a href="https://github.com/Pana1v/polka/tree/kilted"><img src="https://img.shields.io/badge/ROS_2-Kilted-22314E?logo=ros&logoColor=white" alt="ROS 2 Kilted"/></a>
+  <a href="https://github.com/Pana1v/polka/tree/lyrical"><img src="https://img.shields.io/badge/ROS_2-Lyrical-22314E?logo=ros&logoColor=white" alt="ROS 2 Lyrical"/></a>
+  <br/>
+  <img src="https://img.shields.io/badge/Ubuntu-22.04-E95420?logo=ubuntu&logoColor=white" alt="Ubuntu 22.04"/>
+  <img src="https://img.shields.io/badge/Ubuntu-24.04-E95420?logo=ubuntu&logoColor=white" alt="Ubuntu 24.04"/>
+  <img src="https://img.shields.io/badge/Ubuntu-26.04-E95420?logo=ubuntu&logoColor=white" alt="Ubuntu 26.04"/>
+  <br/>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/Pana1v/polka?color=blue" alt="License: Apache-2.0"/></a>
+  <a href="https://github.com/Pana1v/polka/stargazers"><img src="https://img.shields.io/github/stars/Pana1v/polka?style=flat" alt="GitHub stars"/></a>
+  <a href="https://github.com/Pana1v/polka/issues"><img src="https://img.shields.io/github/issues/Pana1v/polka" alt="GitHub issues"/></a>
+  <a href="https://github.com/Pana1v/polka/commits"><img src="https://img.shields.io/github/last-commit/Pana1v/polka" alt="Last commit"/></a>
+</p>
+
+<p align="center">
   <img src="images/polka.png" alt="Polka" width="700"/>
-  <img width="700" alt="pipeline_demo" src="media/pipeline_demo.gif" />
+</p>
+
+<p align="center">
+  <img src="media/pipeline_demo.gif" alt="Polka pipeline stages" width="720"/>
+  <br/>
+  <em>Pipeline stages: raw &rarr; deskew &rarr; per-source filter &rarr; merge &rarr; output filter &rarr; voxel &mdash; <a href="media/">regenerate</a></em>
 </p>
 
 
@@ -10,15 +32,24 @@
 
 ## Supported ROS 2 Distributions
 
-| Distro | Ubuntu | Branch |
-|--------|--------|--------|
-| Humble | 22.04  | [`humble`](../../tree/humble) |
-| Jazzy  | 24.04  | [`jazzy`](../../tree/jazzy) |
+Each distro has its own branch. The branches are kept in sync from a single source of
+truth — see [Maintaining distro branches](#maintaining-distro-branches).
+
+| Distro  | Codename  | Ubuntu | Branch |
+|---------|-----------|--------|--------|
+| Humble  | Hawksbill | 22.04  | [`humble`](../../tree/humble) |
+| Iron    | Irwini    | 22.04  | [`iron`](../../tree/iron) |
+| Jazzy   | Jalisco   | 24.04  | [`jazzy`](../../tree/jazzy) |
+| Kilted  | Kaiju     | 24.04  | [`kilted`](../../tree/kilted) |
+| Lyrical | Luth      | 26.04  | [`lyrical`](../../tree/lyrical) |
 
 ```bash
 # Clone the branch matching your distro
-git clone -b humble https://github.com/Pan-Navigator/polka.git  # Humble
-git clone -b jazzy  https://github.com/Pan-Navigator/polka.git  # Jazzy
+git clone -b humble  https://github.com/Pana1v/polka.git  # Humble  (22.04)
+git clone -b iron    https://github.com/Pana1v/polka.git  # Iron    (22.04)
+git clone -b jazzy   https://github.com/Pana1v/polka.git  # Jazzy   (24.04)
+git clone -b kilted  https://github.com/Pana1v/polka.git  # Kilted  (24.04)
+git clone -b lyrical https://github.com/Pana1v/polka.git  # Lyrical (26.04)
 ```
 
 Polka replaces multi-node pipelines (relay -> filter -> transform -> merge -> downsample) with a single composable node, dramatically reducing latency, CPU overhead, and configuration complexity.
@@ -396,6 +427,29 @@ The per-point deskewing motion model (SE(3) exponential map with constant-accele
   url     = {https://arxiv.org/pdf/2509.06593},
 }
 ```
+
+## Maintaining distro branches
+
+polka supports five ROS 2 distros from five branches that are intentionally **code-identical**.
+To keep them in sync without N× the work, development follows a single-source-of-truth model:
+
+- **Develop once, on `humble`** (the oldest supported distro = most conservative API). Code that
+  compiles on Humble compiles forward to Lyrical far more reliably than the reverse.
+- **Fan out, don't hand-pair.** A merged change on `humble` is propagated to the other branches with
+  [`scripts/sync-distros.sh`](scripts/sync-distros.sh) — no more manual `-jazzy`/`-kilted` siblings.
+- **Where a distro's API genuinely differs**, branch *inside the source file* with a compile-time
+  guard so the branches stay identical, e.g.:
+  ```cpp
+  #if __has_include(<cv_bridge/cv_bridge.hpp>)
+  #  include <cv_bridge/cv_bridge.hpp>   // Jazzy / Kilted / Lyrical
+  #else
+  #  include <cv_bridge/cv_bridge.h>      // Humble / Iron
+  #endif
+  ```
+- **A CI matrix** ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) builds the package against
+  every distro on each push/PR — the safety net that catches per-distro drift automatically.
+
+Full details and the contributor workflow are in [MAINTAINING.md](MAINTAINING.md).
 
 ## License
 

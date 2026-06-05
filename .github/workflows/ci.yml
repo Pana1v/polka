@@ -1,0 +1,61 @@
+name: CI
+
+# Build + test polka against every supported ROS 2 distro.
+# This is the safety net for the single-source-of-truth branch model (see MAINTAINING.md):
+# a change developed on `humble` and fanned out to the other distro branches is built here
+# against each distro, catching per-distro API/syntax drift automatically.
+
+on:
+  push:
+    branches: [humble, iron, jazzy, kilted, lyrical]
+  pull_request:
+    branches: [humble, iron, jazzy, kilted, lyrical]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: ${{ matrix.distro }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # `image` is the container the package is built in.
+        include:
+          - distro: humble
+            image: osrf/ros:humble-desktop
+          - distro: iron
+            image: osrf/ros:iron-desktop
+          - distro: jazzy
+            image: osrf/ros:jazzy-desktop
+          - distro: kilted
+            image: osrf/ros:kilted-desktop
+          - distro: lyrical
+            image: osrf/ros:lyrical-desktop
+    container:
+      image: ${{ matrix.image }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          path: src/polka
+
+      - name: Install dependencies (rosdep)
+        shell: bash
+        run: |
+          source "/opt/ros/${ROS_DISTRO}/setup.bash"
+          apt-get update
+          rosdep update --rosdistro "${ROS_DISTRO}"
+          rosdep install --from-paths src --ignore-src -y --rosdistro "${ROS_DISTRO}"
+
+      - name: Build
+        shell: bash
+        run: |
+          source "/opt/ros/${ROS_DISTRO}/setup.bash"
+          colcon build --packages-select polka --event-handlers console_direct+
+
+      - name: Test
+        shell: bash
+        run: |
+          source "/opt/ros/${ROS_DISTRO}/setup.bash"
+          colcon test --packages-select polka --event-handlers console_direct+
+          colcon test-result --verbose

@@ -27,11 +27,19 @@ def generate_launch_description():
 
     return LaunchDescription([
         DeclareLaunchArgument('config_file', default_value=default_config),
+        # Default false for live sensor data. Set true to replay a rosbag, and play the
+        # bag with the --clock flag (ros2 bag play <bag> --clock) so the staleness check
+        # compares against bag time rather than wall time:
+        #   ros2 launch polka polka.launch.py use_sim_time:=true
+        DeclareLaunchArgument('use_sim_time', default_value='false'),
         Node(
             package='polka',
             executable='polka_node',
             name='polka',
             output='screen',
-            parameters=[LaunchConfiguration('config_file')],
+            parameters=[
+                LaunchConfiguration('config_file'),
+                {'use_sim_time': LaunchConfiguration('use_sim_time')},
+            ],
         ),
     ])

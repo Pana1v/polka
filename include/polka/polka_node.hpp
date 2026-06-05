@@ -52,6 +52,10 @@ private:
   sensor_msgs::msg::PointCloud2 to_cloud_msg(const CloudT & cloud) const;
   bool reconfigure();
   void log_startup_banner() const;
+  // One-shot check that the node clock and the incoming sensor stamps agree. Emits a
+  // single actionable warning when they don't (the classic rosbag-without-sim-time or
+  // sim-time-without-/clock misconfiguration), then latches via clock_diagnosed_.
+  void diagnose_clock_health(const rclcpp::Time & now);
 
   MergeConfig config_;
 
@@ -79,6 +83,9 @@ private:
   std::vector<float> last_scan_ranges_;
   rclcpp::Time last_cloud_stamp_;
   mutable std::mutex last_data_mutex_;
+
+  // Set once diagnose_clock_health() has emitted its warning, so it stays quiet after.
+  bool clock_diagnosed_{false};
 
   // Runtime reconfiguration
   ConfigLoader config_loader_;

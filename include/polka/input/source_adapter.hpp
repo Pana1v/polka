@@ -47,6 +47,7 @@ public:
 
   CloudT::ConstPtr get_latest() const;
   bool is_stale(double timeout_sec, const rclcpp::Time & now) const;
+  bool received() const { return has_received_.load(); }
   rclcpp::Time last_stamp() const;
   std::string name() const { return config_.name; }
   std::string frame_id() const;

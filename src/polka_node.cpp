@@ -122,9 +122,53 @@ PolkaNode::PolkaNode(const rclcpp::NodeOptions & options)
     });
 }
 
+void PolkaNode::diagnose_clock_health(const rclcpp::Time & now)
+{
+  if (clock_diagnosed_) return;
+
+  // Newest sensor stamp across sources that have actually received data. Without any
+  // data there is nothing to compare the clock against, so we can't judge yet.
+  rclcpp::Time newest;
+  bool any = false;
+  for (const auto & src : sources_) {
+    if (!src->received()) continue;
+    auto stamp = src->last_stamp();
+    if (!any || stamp > newest) { newest = stamp; any = true; }
+  }
+  if (!any) return;
+
+  const double dt = (now - newest).seconds();
+  const bool sim = this->get_parameter("use_sim_time").as_bool();
+
+  // Allow normal jitter (and the correct --clock case): only react when the clock and
+  // the data disagree by several staleness windows.
+  const double mismatch = std::max(2.0, config_.source_timeout * 4.0);
+  if (std::fabs(dt) < mismatch) return;
+
+  if (sim && count_publishers("/clock") == 0) {
+    // Sim time requested but nothing drives /clock, so the clock is frozen near zero.
+    RCLCPP_WARN(get_logger(),
+      "polka: use_sim_time=true but no publisher on /clock was found — the simulated "
+      "clock is not advancing, so timestamp/staleness checks are unreliable. If you are "
+      "replaying a rosbag, play it with the --clock flag: ros2 bag play <bag> --clock");
+    clock_diagnosed_ = true;
+  } else if (!sim && dt > mismatch) {
+    // Wall clock vs historical bag stamps: every source will be dropped as stale.
+    RCLCPP_WARN(get_logger(),
+      "polka: sensor timestamps are %.1f s behind the system clock. This looks like "
+      "rosbag replay without simulated time; all sources will be dropped as stale and "
+      "no merged cloud will be published. Set use_sim_time:=true and replay with the "
+      "--clock flag: ros2 bag play <bag> --clock", dt);
+    clock_diagnosed_ = true;
+  }
+  // Otherwise (e.g. sim time enabled and /clock present but not yet synced at startup)
+  // leave clock_diagnosed_ unset and re-evaluate on the next tick — no false alarm.
+}
+
 void PolkaNode::output_callback()
 {
   auto now = this->now();
+  diagnose_clock_health(now);
 
   struct SourceData {
     CloudT::ConstPtr cloud;

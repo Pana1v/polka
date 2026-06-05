@@ -88,6 +88,35 @@ colcon build --packages-select polka --cmake-args -DWITH_CUDA=ON
    ros2 launch polka polka.launch.py config_file:=config/my_robot.yaml
    ```
 
+## Rosbag / Simulation Playback
+
+The default configuration targets **live sensor data** and runs on the system (wall)
+clock. The `source_timeout` staleness check (`0.5 s` by default) compares each message's
+header stamp against the node clock, so when you replay a rosbag — whose stamps are
+historical — every source is immediately judged stale and **no merged cloud is
+published**. Most people hit this the first time they test with a bag.
+
+To replay a bag correctly, enable simulated time **and** play the bag with `--clock` so
+the node's clock tracks bag time:
+
+```bash
+ros2 launch polka polka.launch.py use_sim_time:=true
+ros2 bag play <bag> --clock
+```
+
+| Argument | Default | Description |
+|---|---|---|
+| `use_sim_time` | `false` | Set `true` for rosbag/simulation replay; the node then uses ROS time driven by `/clock`. |
+
+If the node detects a clock/timestamp mismatch it prints a single actionable warning
+naming the fix, so you don't have to guess:
+
+- Bag stamps far behind the system clock (`use_sim_time` left `false`) → reminds you to
+  set `use_sim_time:=true` and play with `--clock`.
+- `use_sim_time:=true` but nothing publishes `/clock` → reminds you to add `--clock`.
+  (In this state the clock is frozen, so clouds may still flow on an undefined stamp —
+  always pass `--clock` for correct timing.)
+
 ## Configuration
 
 All parameters live under the `polka` namespace. [config/example_params.yaml](config/example_params.yaml) is a minimal starter; see [config/detailed_params.yaml](config/detailed_params.yaml) for the full annotated reference of every parameter.

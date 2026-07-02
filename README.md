@@ -105,4 +105,4 @@ Set `output_frame_id` to your base frame, list sensors under `source_names`, and
 
 ## License and credits
 
-Apache-2.0. The per-point deskewing motion model is inspired by [rko_lio](https://github.com/TixiaoShan/rko_lio) (Malladi et al., 2025, [arXiv:2509.06593](https://arxiv.org/pdf/2509.06593)).
+Apache-2.0. The per-point deskewing motion model is inspired by [rko_lio](https://github.com/PRBonn/rko_lio) (Malladi et al., 2025, [arXiv:2509.06593](https://arxiv.org/pdf/2509.06593)).

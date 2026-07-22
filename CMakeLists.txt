@@ -21,6 +21,7 @@ find_package(tf2_geometry_msgs REQUIRED)
 find_package(tf2_eigen REQUIRED)
 find_package(pcl_conversions REQUIRED)
 find_package(laser_geometry REQUIRED)
+find_package(diagnostic_msgs REQUIRED)
 find_package(PCL REQUIRED COMPONENTS common filters)
 find_package(Eigen3 REQUIRED)
 
@@ -46,6 +47,8 @@ include_directories(include ${PCL_INCLUDE_DIRS} ${EIGEN3_INCLUDE_DIRS})
 
 set(POLKA_CORE_SOURCES
   src/config_loader.cpp
+  src/diag/drift_tracker.cpp
+  src/diag/diagnostics_reporter.cpp
   src/imu_buffer.cpp
   src/filters/range_filter.cpp
   src/filters/angular_filter.cpp
@@ -70,6 +73,7 @@ if(COMMAND ament_target_dependencies)
   ament_target_dependencies(polka_core
     rclcpp rclcpp_components sensor_msgs
     tf2_ros tf2_geometry_msgs tf2_eigen pcl_conversions laser_geometry
+    diagnostic_msgs
   )
 else()
   target_link_libraries(polka_core
@@ -81,6 +85,7 @@ else()
     tf2_eigen::tf2_eigen
     ${pcl_conversions_TARGETS}
     laser_geometry::laser_geometry
+    ${diagnostic_msgs_TARGETS}
   )
   # pcl_conversions is header-only on some distros and exports no link target;
   # make sure its headers are on the include path regardless.
@@ -119,6 +124,16 @@ if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
   set(ament_cmake_copyright_FOUND TRUE)
   ament_lint_auto_find_test_dependencies()
+
+  find_package(ament_cmake_gtest REQUIRED)
+  foreach(test_name
+      test_drift_tracker
+      test_stat_counters
+      test_config_preview
+      test_runtime_reconfigure)
+    ament_add_gtest(${test_name} test/${test_name}.cpp)
+    target_link_libraries(${test_name} polka_core)
+  endforeach()
 endif()
 
 ament_package()

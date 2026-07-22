@@ -16,6 +16,7 @@
 #define POLKA__INPUT__SOURCE_ADAPTER_HPP
 
 #include "polka/types.hpp"
+#include "polka/diag/stat_counters.hpp"
 #include "polka/input/imu_buffer.hpp"
 #include "polka/filters/i_filter.hpp"
 
@@ -55,6 +56,13 @@ public:
   const FilterParams & filter_params() const { return config_.filter_params; }
   void rebuild_filters(const FilterParams & fp);
 
+  // Cumulative traffic totals for the diagnostics tick (rates are derived
+  // there by differencing successive samples).
+  StatSample stats() const { return stats_.sample(); }
+  // True once a message arrived whose fields failed validation (the source
+  // drops everything from then on) - surfaced as a diagnostics ERROR.
+  bool fields_invalid() const { return fields_validated_ && !fields_valid_; }
+
 private:
   void pc2_callback(sensor_msgs::msg::PointCloud2::ConstSharedPtr msg);
   void scan_callback(sensor_msgs::msg::LaserScan::ConstSharedPtr msg);
@@ -84,6 +92,7 @@ private:
 
   std::atomic<bool> has_received_{false};
   std::atomic<uint64_t> message_counter_{0};
+  StatCounters stats_;
 
   laser_geometry::LaserProjection projector_;
   bool fields_validated_{false};

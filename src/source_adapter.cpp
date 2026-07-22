@@ -269,7 +269,11 @@ void SourceAdapter::pc2_callback(sensor_msgs::msg::PointCloud2::ConstSharedPtr m
       deskew_cloud(*cloud, *msg, *imu);
   }
 
+  const uint64_t points_raw = cloud->size();
   apply_filters(*cloud);
+  // +72 approximates the fixed PointCloud2 overhead (header/fields/dims), so
+  // bandwidth tracks the application payload rather than exact wire bytes.
+  stats_.record(msg->data.size() + 72, points_raw, cloud->size());
   store_cloud(cloud, msg->header);
 }
 
@@ -289,7 +293,13 @@ void SourceAdapter::scan_callback(sensor_msgs::msg::LaserScan::ConstSharedPtr ms
   pcl::fromROSMsg(pc2_msg, *cloud);
   // Projected scans carry no per-point time; populate falls back to header stamp.
   populate_point_time(*cloud, pc2_msg);
+  const uint64_t points_raw = cloud->size();
   apply_filters(*cloud);
+  // Bandwidth counts the LaserScan as received (float32 ranges/intensities
+  // + ~60 B header), not the fatter projected cloud derived from it.
+  stats_.record(
+    4 * (msg->ranges.size() + msg->intensities.size()) + 60,
+    points_raw, cloud->size());
   store_cloud(cloud, msg->header);
 }
 

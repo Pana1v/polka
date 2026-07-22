@@ -339,6 +339,38 @@ hysteresis, so a jittery boundary can not flap the flag):
 All thresholds are runtime-reconfigurable. See the `diagnostics:` block in
 [config/detailed_params.yaml](config/detailed_params.yaml).
 
+### Terminal Dashboard
+
+`polka_monitor` is an optional terminal UI built on the diagnostics above — no
+GUI, no rviz, works over SSH and inside `docker exec`. It subscribes to
+`/diagnostics`, `/rosout`, and the merged output topics (which it discovers
+automatically from the diagnostics), so it never adds load to the merge path.
+
+```bash
+ros2 run polka polka_monitor            # any terminal, while polka runs
+ros2 run polka polka_monitor --node polka --rate 1.0
+```
+
+- **Left**: Braille-rendered top (x-y) and side (x-z) views of the merged
+  cloud, with the merged scan overlaid on the top view. Density shades the dots;
+  the extent auto-scales (toggle to a fixed extent with `f`).
+- **Right**: a per-source table (rate, bandwidth, message age, stamp offset,
+  filter drop %) colored by status, plus a live warning feed that merges
+  polka's `/rosout` warnings with stale/drift transitions.
+- **Keys**: `q` quit, `f` fixed/auto extent, `v` toggle views, `p` pause feed.
+
+It is opt-in and changes nothing about the node's normal operation. To run it in
+the same terminal as a launch, pass `dashboard:=true` (the node's logs are
+redirected to the log file so they don't fight the UI):
+
+```bash
+ros2 launch polka polka.launch.py dashboard:=true config_file:=<your>.yaml
+```
+
+Running `polka_monitor` in a second terminal is the simplest path and always
+works; the `dashboard:=true` route additionally re-attaches the UI to the
+controlling terminal, which `ros2 launch` otherwise does not provide.
+
 ## Pipeline Comparison
 
 ### polka (1 node)

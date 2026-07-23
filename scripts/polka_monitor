@@ -181,9 +181,12 @@ class RosIO(Node):
         if msg.name != self.args.node or msg.level < _LOG_WARN:
             return
         severity = 1 if msg.level == _LOG_WARN else 2
-        match = re.search(r"source '([^']+)'", msg.msg)
+        # rosout text already names the source ("polka: source 'x' is stale");
+        # the tag renders that same name as a color, so strip the matched
+        # prefix instead of showing it twice.
+        match = re.search(r"source '([^']+)'\s*", msg.msg)
         tag = match.group(1) if match else None
-        text = '[%s] %s' % (tag or '-', msg.msg)
+        text = '[%s] %s' % (tag, msg.msg[match.end():]) if match else msg.msg
         with self.lock:
             self.saw_node = True
             self.feed.appendleft((time.time(), severity, tag, text))
@@ -528,11 +531,7 @@ class Dashboard:
         for x, y, _ in cloud:
             canvas.plot(0.5 - y / (2 * extent), 0.5 - x / (2 * extent))
         self._blit(stdscr, canvas, y0 + 1, x0, 0)
-        if scan:
-            overlay = Braille(width - 1, top_h)
-            for x, y in scan:
-                overlay.plot(0.5 - y / (2 * extent), 0.5 - x / (2 * extent))
-            self._blit(stdscr, overlay, y0 + 1, x0, curses.color_pair(4))
+        # Scan gets its own dedicated panel below, so it's not also overlaid here.
         if not cloud:
             stdscr.addstr(y0 + 2, x0 + 2, 'waiting for merged cloud...', curses.A_DIM)
 
@@ -575,7 +574,10 @@ class Dashboard:
         stdscr.addstr(row, x0, header[:width - 1], curses.A_UNDERLINE)
         row += 1
         for (name, rate, age, offset, label, level) in source_rows(statuses):
-            color = curses.color_pair({0: 1, 1: 2}.get(level, 3))
+            # Bold makes these render as light tints instead of the base
+            # 8-color palette's dark shades (plain blue is nearly invisible
+            # on a black background).
+            color = curses.color_pair({0: 1, 1: 2}.get(level, 3)) | curses.A_BOLD
             line = ' %-10s %6s %8s %8s' % (
                 name[:10], _num(rate), _num(age), _num(offset))
             stdscr.addstr(row, x0, line[:width - 1], color)
@@ -585,7 +587,7 @@ class Dashboard:
                 row += 1
         for (name, rate, bw, points) in output_rows(statuses):
             line = ' %-10s %6s %9s  points_out=%s' % (name, _num(rate), bw, points)
-            stdscr.addstr(row, x0, line[:width - 1], curses.color_pair(4))
+            stdscr.addstr(row, x0, line[:width - 1], curses.color_pair(4) | curses.A_BOLD)
             row += 1
         row += 1
         title = ' warnings %s' % ('(paused)' if self.paused else '')
@@ -605,8 +607,9 @@ class Dashboard:
                 color = curses.color_pair(self._color_for_source(source))
             else:
                 color = curses.color_pair({0: 1, 1: 2}.get(severity, 3))
-            attr = curses.A_BOLD if severity == 2 else (
-                curses.A_DIM if severity == 0 else 0)
+            # Always bold: the base 8-color palette's dark shades (blue in
+            # particular) are close to invisible on a black background.
+            attr = curses.A_BOLD
             clock = time.strftime('%H:%M:%S', time.localtime(stamp))
             prefix = ' %s ' % clock
             avail = max(10, width - 1 - len(prefix))

@@ -714,7 +714,7 @@ void PolkaNode::output_callback()
     double spread = (*mx - *mn).seconds();
     if (spread > config_.max_source_spread_warn)
       RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), kLogThrottleNormalMs,
-        "polka: source spread %6.3f s > %6.3f s", spread, config_.max_source_spread_warn);
+        "polka: sync gap %6.3f s > %6.3f s", spread, config_.max_source_spread_warn);
   }
 
   auto output_stamp = compute_output_stamp(stamps);

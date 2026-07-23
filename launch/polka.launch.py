@@ -22,6 +22,7 @@ from launch.actions import ExecuteProcess
 from launch.conditions import IfCondition
 from launch.conditions import UnlessCondition
 from launch.substitutions import LaunchConfiguration
+from launch.substitutions import PythonExpression
 from launch_ros.actions import Node
 
 
@@ -32,6 +33,7 @@ def generate_launch_description():
     config_file = LaunchConfiguration('config_file')
     use_sim_time = LaunchConfiguration('use_sim_time')
     dashboard = LaunchConfiguration('dashboard')
+    dashboard_viz = LaunchConfiguration('dashboard_viz')
 
     node_params = [config_file, {'use_sim_time': use_sim_time}]
 
@@ -49,6 +51,11 @@ def generate_launch_description():
         # The dashboard is equally available standalone in any other terminal:
         #   ros2 run polka polka_monitor
         DeclareLaunchArgument('dashboard', default_value='false'),
+        # Point-cloud/scan views roughly double the dashboard's CPU use (measured
+        # ~30% vs ~14% of one core decoding and Braille-rendering the merged
+        # cloud). Set false for a lighter table/feed-only dashboard.
+        #   ros2 launch polka polka.launch.py dashboard:=true dashboard_viz:=false
+        DeclareLaunchArgument('dashboard_viz', default_value='true'),
 
         # Normal path: node owns the terminal for its logs.
         Node(
@@ -79,8 +86,10 @@ def generate_launch_description():
         # grandchild it spawns.
         ExecuteProcess(
             cmd=['bash', '-c',
-                 'exec "%s" --node polka </dev/tty >/dev/tty 2>&1' % os.path.join(
-                     get_package_prefix('polka'), 'lib', 'polka', 'polka_monitor')],
+                 ['exec "%s" --node polka' % os.path.join(
+                     get_package_prefix('polka'), 'lib', 'polka', 'polka_monitor'),
+                  PythonExpression(["'' if '", dashboard_viz, "' == 'true' else ' --no-viz'"]),
+                  ' </dev/tty >/dev/tty 2>&1']],
             output='screen',
             condition=IfCondition(dashboard),
         ),

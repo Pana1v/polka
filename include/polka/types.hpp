@@ -12,8 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#ifndef POLKA__TYPES_HPP
-#define POLKA__TYPES_HPP
+#ifndef POLKA__TYPES_HPP_
+#define POLKA__TYPES_HPP_
+
+#include <pcl/point_types.h>
+#include <pcl/point_cloud.h>
+#include <Eigen/Core>
 
 #include <string>
 #include <vector>
@@ -21,11 +25,8 @@
 #include <stdexcept>
 #include <utility>
 
-#include <pcl/point_types.h>
-#include <pcl/point_cloud.h>
-#include <Eigen/Core>
-
-namespace polka {
+namespace polka
+{
 
 // Point with a per-point acquisition timestamp.
 //
@@ -38,7 +39,8 @@ namespace polka {
 // At publish time, with point_timestamps.mode = OFFSET, PolkaNode::rebase_point_time
 // converts 'time' to an offset relative to the merged cloud header (the convention
 // deskewing consumers expect); with mode = ABSOLUTE it is emitted unchanged.
-struct EIGEN_ALIGN16 PointXYZIT {
+struct EIGEN_ALIGN16 PointXYZIT
+{
   PCL_ADD_POINT4D;       // adds float x, y, z (+ padding) as a SSE-aligned block
   float intensity;
   double time;
@@ -56,12 +58,14 @@ enum class TimestampStrategy { EARLIEST, LATEST, AVERAGE, LOCAL };
 //   ABSOLUTE - raw Unix seconds, as received from the source LiDAR
 enum class PerPointTimeMode { OFFSET, ABSOLUTE };
 
-struct PerPointTimeConfig {
+struct PerPointTimeConfig
+{
   bool enabled = false;                          // emit a per-point 'time' field
   PerPointTimeMode mode = PerPointTimeMode::OFFSET;
 };
 
-struct FilterParams {
+struct FilterParams
+{
   double min_range = 0.0;
   double max_range = 100.0;
   double min_range_sq = 0.0;
@@ -78,30 +82,39 @@ struct FilterParams {
   Eigen::Vector3d box_min = Eigen::Vector3d(-100.0, -100.0, -100.0);
   Eigen::Vector3d box_max = Eigen::Vector3d(100.0, 100.0, 100.0);
 
-  void compute_squared_ranges() {
+  void compute_squared_ranges()
+  {
     min_range_sq = min_range * min_range;
     max_range_sq = max_range * max_range;
   }
 
-  void validate() const {
-    if (min_range < 0)
+  void validate() const
+  {
+    if (min_range < 0) {
       throw std::invalid_argument("min_range must be non-negative");
-    if (max_range <= min_range)
+    }
+    if (max_range <= min_range) {
       throw std::invalid_argument("max_range must be greater than min_range");
+    }
     for (const auto & r : angular_ranges) {
       if (r.first < 0.0 || r.first > 360.0 ||
-          r.second < 0.0 || r.second > 360.0)
+        r.second < 0.0 || r.second > 360.0)
+      {
         throw std::invalid_argument("angular range values must be in [0, 360] degrees");
+      }
     }
     if (box_filter_enabled) {
       if (box_min.x() >= box_max.x() || box_min.y() >= box_max.y() ||
-          box_min.z() >= box_max.z())
+        box_min.z() >= box_max.z())
+      {
         throw std::invalid_argument("box_min must be less than box_max in all dimensions");
+      }
     }
   }
 };
 
-struct FlattenParams {
+struct FlattenParams
+{
   double z_min = -0.15;
   double z_max = 0.15;
   double angle_min = -3.14159265;
@@ -111,23 +124,30 @@ struct FlattenParams {
   double range_max = 100.0;
   int n_bins = 0;
 
-  void compute_bins() {
+  void compute_bins()
+  {
     n_bins = static_cast<int>((angle_max - angle_min) / angle_increment);
   }
 
-  void validate() const {
-    if (z_min >= z_max)
+  void validate() const
+  {
+    if (z_min >= z_max) {
       throw std::invalid_argument("z_min must be less than z_max");
-    if (angle_min >= angle_max)
+    }
+    if (angle_min >= angle_max) {
       throw std::invalid_argument("angle_min must be less than angle_max");
-    if (angle_increment <= 0)
+    }
+    if (angle_increment <= 0) {
       throw std::invalid_argument("angle_increment must be positive");
-    if (range_min < 0 || range_max <= range_min)
+    }
+    if (range_min < 0 || range_max <= range_min) {
       throw std::invalid_argument("range_min must be non-negative and less than range_max");
+    }
   }
 };
 
-struct SourceConfig {
+struct SourceConfig
+{
   std::string name;
   std::string topic;
   std::string imu_topic;  // per-source IMU override (empty = use global)
@@ -137,31 +157,36 @@ struct SourceConfig {
   FilterParams filter_params;
 };
 
-struct HeightCapConfig {
+struct HeightCapConfig
+{
   bool enabled = false;
   double z_min = -1.0;
   double z_max = 3.0;
 };
 
-struct VoxelConfig {
+struct VoxelConfig
+{
   bool enabled = false;
   float leaf_x = 0.0f;
   float leaf_y = 0.0f;
   float leaf_z = 0.0f;
 };
 
-struct ExclusionBox {
+struct ExclusionBox
+{
   Eigen::Vector3d min = Eigen::Vector3d::Zero();
   Eigen::Vector3d max = Eigen::Vector3d::Zero();
   std::string label;
 };
 
-struct SelfFilterConfig {
+struct SelfFilterConfig
+{
   bool enabled = false;
   std::vector<ExclusionBox> boxes;
 };
 
-struct OutputQosConfig {
+struct OutputQosConfig
+{
   std::string reliability = "reliable";
   std::string durability = "volatile";
   int history_depth = 10;
@@ -171,7 +196,8 @@ struct OutputQosConfig {
   double lifespan_ms = 0.0;
 };
 
-struct CloudOutputConfig {
+struct CloudOutputConfig
+{
   bool enabled = true;
   std::string topic = "~/merged_cloud";
   OutputQosConfig qos;
@@ -181,14 +207,16 @@ struct CloudOutputConfig {
   SelfFilterConfig self_filter;
 };
 
-struct ScanOutputConfig {
+struct ScanOutputConfig
+{
   bool enabled = false;
   std::string topic = "~/merged_scan";
   OutputQosConfig qos;
   FlattenParams flatten;
 };
 
-struct MotionCompensationConfig {
+struct MotionCompensationConfig
+{
   bool enabled = false;
   std::string imu_topic = "";                    // sensor_msgs/Imu topic
   double max_imu_age = 0.2;                      // reject stale IMU data (seconds)
@@ -198,7 +226,8 @@ struct MotionCompensationConfig {
   std::string imu_frame = "";                     // empty = auto-detect from IMU msg header
 };
 
-struct MergeConfig {
+struct MergeConfig
+{
   std::string output_frame_id = "base_link";
   double output_rate = 20.0;
   double source_timeout = 0.5;
@@ -224,10 +253,6 @@ struct MergeConfig {
 
 POINT_CLOUD_REGISTER_POINT_STRUCT(
   polka::PointXYZIT,
-  (float, x, x)
-  (float, y, y)
-  (float, z, z)
-  (float, intensity, intensity)
-  (double, time, time))
+  (float, x, x)(float, y, y)(float, z, z)(float, intensity, intensity)(double, time, time))
 
-#endif  // POLKA__TYPES_HPP
+#endif  // POLKA__TYPES_HPP_

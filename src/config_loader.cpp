@@ -16,7 +16,8 @@
 #include <stdexcept>
 #include <cmath>
 
-namespace polka {
+namespace polka
+{
 
 ConfigLoader::ConfigLoader(rclcpp::Node * node)
 : node_(node), logger_(node->get_logger())
@@ -62,7 +63,9 @@ void ConfigLoader::declare_defaults()
   node_->declare_parameter<double>("outputs.cloud.filters.range.max", 30.0);
   node_->declare_parameter<bool>("outputs.cloud.filters.angular.enabled", false);
   node_->declare_parameter<bool>("outputs.cloud.filters.angular.invert", false);
-  node_->declare_parameter<std::vector<double>>("outputs.cloud.filters.angular.ranges", {0.0, 360.0});
+  node_->declare_parameter<std::vector<double>>(
+    "outputs.cloud.filters.angular.ranges",
+    {0.0, 360.0});
   node_->declare_parameter<bool>("outputs.cloud.filters.box.enabled", false);
   node_->declare_parameter<double>("outputs.cloud.filters.box.x_min", -20.0);
   node_->declare_parameter<double>("outputs.cloud.filters.box.x_max", 20.0);
@@ -137,8 +140,8 @@ FilterParams ConfigLoader::load_filter_params(const std::string & prefix)
   for (size_t i = 0; i + 1 < ang_flat.size(); i += 2) {
     double lo = std::fmod(ang_flat[i], 360.0);
     double hi = std::fmod(ang_flat[i + 1], 360.0);
-    if (lo < 0.0) lo += 360.0;
-    if (hi < 0.0) hi += 360.0;
+    if (lo < 0.0) {lo += 360.0;}
+    if (hi < 0.0) {hi += 360.0;}
     fp.angular_ranges.emplace_back(lo, hi);
   }
 
@@ -166,17 +169,23 @@ MergeConfig ConfigLoader::read_common_params()
   cfg.max_source_spread_warn = node_->get_parameter("max_source_spread_warn").as_double();
 
   auto ts_str = node_->get_parameter("timestamp_strategy").as_string();
-  if (ts_str == "earliest") cfg.timestamp_strategy = TimestampStrategy::EARLIEST;
-  else if (ts_str == "latest") cfg.timestamp_strategy = TimestampStrategy::LATEST;
-  else if (ts_str == "average") cfg.timestamp_strategy = TimestampStrategy::AVERAGE;
-  else if (ts_str == "local") cfg.timestamp_strategy = TimestampStrategy::LOCAL;
-  else throw std::runtime_error("polka: invalid timestamp_strategy '" + ts_str + "'");
+  if (ts_str == "earliest") {
+    cfg.timestamp_strategy = TimestampStrategy::EARLIEST;
+  } else if (ts_str == "latest") {
+    cfg.timestamp_strategy = TimestampStrategy::LATEST;
+  } else if (ts_str == "average") {
+    cfg.timestamp_strategy = TimestampStrategy::AVERAGE;
+  } else if (ts_str == "local") {cfg.timestamp_strategy = TimestampStrategy::LOCAL;} else {
+    throw std::runtime_error("polka: invalid timestamp_strategy '" + ts_str + "'");
+  }
 
   cfg.point_timestamps.enabled = node_->get_parameter("point_timestamps.enabled").as_bool();
   auto ppt_mode = node_->get_parameter("point_timestamps.mode").as_string();
-  if (ppt_mode == "offset") cfg.point_timestamps.mode = PerPointTimeMode::OFFSET;
-  else if (ppt_mode == "absolute") cfg.point_timestamps.mode = PerPointTimeMode::ABSOLUTE;
-  else throw std::runtime_error("polka: invalid point_timestamps.mode '" + ppt_mode + "'");
+  if (ppt_mode == "offset") {
+    cfg.point_timestamps.mode = PerPointTimeMode::OFFSET;
+  } else if (ppt_mode == "absolute") {
+    cfg.point_timestamps.mode = PerPointTimeMode::ABSOLUTE;
+  } else {throw std::runtime_error("polka: invalid point_timestamps.mode '" + ppt_mode + "'");}
   cfg.suppress_duplicate_timestamps =
     node_->get_parameter("suppress_duplicate_timestamps").as_bool();
 
@@ -205,8 +214,9 @@ MergeConfig ConfigLoader::read_common_params()
     double lx = node_->get_parameter("outputs.cloud.voxel.leaf_x").as_double();
     double ly = node_->get_parameter("outputs.cloud.voxel.leaf_y").as_double();
     double lz = node_->get_parameter("outputs.cloud.voxel.leaf_z").as_double();
-    if (uniform > 0.0 && lx == 0.0 && ly == 0.0 && lz == 0.0)
+    if (uniform > 0.0 && lx == 0.0 && ly == 0.0 && lz == 0.0) {
       lx = ly = lz = uniform;
+    }
     cfg.cloud_output.voxel.leaf_x = static_cast<float>(lx);
     cfg.cloud_output.voxel.leaf_y = static_cast<float>(ly);
     cfg.cloud_output.voxel.leaf_z = static_cast<float>(lz);
@@ -229,7 +239,8 @@ MergeConfig ConfigLoader::read_common_params()
   cfg.scan_output.flatten.z_max = node_->get_parameter("outputs.scan.z_max").as_double();
   cfg.scan_output.flatten.angle_min = node_->get_parameter("outputs.scan.angle_min").as_double();
   cfg.scan_output.flatten.angle_max = node_->get_parameter("outputs.scan.angle_max").as_double();
-  cfg.scan_output.flatten.angle_increment = node_->get_parameter("outputs.scan.angle_increment").as_double();
+  cfg.scan_output.flatten.angle_increment =
+    node_->get_parameter("outputs.scan.angle_increment").as_double();
   cfg.scan_output.flatten.range_min = node_->get_parameter("outputs.scan.range_min").as_double();
   cfg.scan_output.flatten.range_max = node_->get_parameter("outputs.scan.range_max").as_double();
   cfg.scan_output.flatten.compute_bins();
@@ -328,7 +339,7 @@ SelfFilterConfig ConfigLoader::load_self_filter_config(const std::string & prefi
 {
   SelfFilterConfig sf;
   sf.enabled = node_->get_parameter(prefix + ".enabled").as_bool();
-  if (!sf.enabled) return sf;
+  if (!sf.enabled) {return sf;}
 
   auto box_names = node_->get_parameter(prefix + ".box_names").as_string_array();
   for (const auto & name : box_names) {
@@ -355,24 +366,31 @@ SelfFilterConfig ConfigLoader::load_self_filter_config(const std::string & prefi
 
 void ConfigLoader::validate(const MergeConfig & config)
 {
-  if (config.sources.empty())
+  if (config.sources.empty()) {
     throw std::runtime_error("polka: source_names is empty");
-  if (config.output_rate <= 0.0 && config.output_rate != -1.0)
+  }
+  if (config.output_rate <= 0.0 && config.output_rate != -1.0) {
     throw std::runtime_error("polka: output_rate must be > 0 or -1 (adaptive)");
-  if (config.source_timeout <= 0.0)
+  }
+  if (config.source_timeout <= 0.0) {
     throw std::runtime_error("polka: source_timeout must be > 0");
-  if (!config.cloud_output.enabled && !config.scan_output.enabled)
+  }
+  if (!config.cloud_output.enabled && !config.scan_output.enabled) {
     throw std::runtime_error("polka: at least one output (cloud or scan) must be enabled");
+  }
   if (config.cloud_output.voxel.enabled) {
     if (config.cloud_output.voxel.leaf_x <= 0.0f ||
-        config.cloud_output.voxel.leaf_y <= 0.0f ||
-        config.cloud_output.voxel.leaf_z <= 0.0f)
+      config.cloud_output.voxel.leaf_y <= 0.0f ||
+      config.cloud_output.voxel.leaf_z <= 0.0f)
+    {
       throw std::runtime_error(
-        "polka: voxel filter enabled but leaf size is <= 0 (would crash pcl::VoxelGrid)");
+              "polka: voxel filter enabled but leaf size is <= 0 (would crash pcl::VoxelGrid)");
+    }
   }
   for (const auto & src : config.sources) {
-    if (src.topic.empty())
+    if (src.topic.empty()) {
       throw std::runtime_error("polka: source '" + src.name + "' has empty topic");
+    }
   }
 }
 

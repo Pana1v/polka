@@ -12,23 +12,28 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#ifndef POLKA__MERGE_ENGINE__I_MERGE_ENGINE_HPP
-#define POLKA__MERGE_ENGINE__I_MERGE_ENGINE_HPP
+#ifndef POLKA__MERGE_ENGINE__I_MERGE_ENGINE_HPP_
+#define POLKA__MERGE_ENGINE__I_MERGE_ENGINE_HPP_
 
-#include "polka/types.hpp"
-#include <vector>
 #include <Eigen/Geometry>
 
-namespace polka {
+#include <vector>
 
-struct MergeInput {
+#include "polka/types.hpp"
+
+namespace polka
+{
+
+struct MergeInput
+{
   CloudT::ConstPtr cloud;
   Eigen::Isometry3d transform;
   FilterParams filter_params;
 };
 
 // Full GPU pipeline configuration - captures everything needed post-merge
-struct PipelineConfig {
+struct PipelineConfig
+{
   FilterParams output_filters;
   bool self_filter_enabled = false;
   std::vector<ExclusionBox> self_filter_boxes;
@@ -38,12 +43,14 @@ struct PipelineConfig {
   FlattenParams flatten;
 };
 
-struct PipelineResult {
+struct PipelineResult
+{
   CloudT::Ptr cloud;
   std::vector<float> scan_ranges;  // non-empty only when GPU produces scan
 };
 
-class IMergeEngine {
+class IMergeEngine
+{
 public:
   virtual CloudT::Ptr merge(const std::vector<MergeInput> & sources) = 0;
   virtual bool is_gpu() const = 0;
@@ -62,4 +69,4 @@ public:
 
 }  // namespace polka
 
-#endif  // POLKA__MERGE_ENGINE__I_MERGE_ENGINE_HPP
+#endif  // POLKA__MERGE_ENGINE__I_MERGE_ENGINE_HPP_

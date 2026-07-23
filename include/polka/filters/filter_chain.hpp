@@ -15,28 +15,32 @@
 #ifndef POLKA__FILTERS__FILTER_CHAIN_HPP_
 #define POLKA__FILTERS__FILTER_CHAIN_HPP_
 
+#include <memory>
+#include <vector>
+
 #include "polka/types.hpp"
 #include "polka/filters/i_filter.hpp"
 #include "polka/filters/range_filter.hpp"
 #include "polka/filters/angular_filter.hpp"
 #include "polka/filters/box_filter.hpp"
 
-#include <memory>
-#include <vector>
-
-namespace polka {
+namespace polka
+{
 
 /// Build a filter chain from a FilterParams config.
 /// Returns an ordered vector: range → angular → box (enabled filters only).
 inline std::vector<std::unique_ptr<IFilter>> build_filter_chain(const FilterParams & fp)
 {
   std::vector<std::unique_ptr<IFilter>> chain;
-  if (fp.range_filter_enabled)
+  if (fp.range_filter_enabled) {
     chain.push_back(std::make_unique<RangeFilter>(fp.min_range, fp.max_range));
-  if (fp.angular_filter_enabled && !fp.angular_ranges.empty())
+  }
+  if (fp.angular_filter_enabled && !fp.angular_ranges.empty()) {
     chain.push_back(std::make_unique<AngularFilter>(fp.angular_ranges, fp.angular_invert));
-  if (fp.box_filter_enabled)
+  }
+  if (fp.box_filter_enabled) {
     chain.push_back(std::make_unique<BoxFilter>(fp.box_min, fp.box_max));
+  }
   return chain;
 }
 

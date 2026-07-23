@@ -15,14 +15,16 @@
 #include "polka/merge_engine/cpu_merge_engine.hpp"
 #include <cmath>
 
-namespace polka {
+namespace polka
+{
 
 CloudT::Ptr CpuMergeEngine::merge(const std::vector<MergeInput> & sources)
 {
   auto output = std::make_shared<CloudT>();
   size_t total = 0;
-  for (const auto & src : sources)
+  for (const auto & src : sources) {
     total += src.cloud->size();
+  }
   output->resize(total);
 
   size_t out_idx = 0;
@@ -30,8 +32,9 @@ CloudT::Ptr CpuMergeEngine::merge(const std::vector<MergeInput> & sources)
     Eigen::Affine3f tf = src.transform.cast<float>();
     for (size_t i = 0; i < src.cloud->size(); ++i) {
       const auto & p = (*src.cloud)[i];
-      if (!std::isfinite(p.x) || !std::isfinite(p.y) || !std::isfinite(p.z))
+      if (!std::isfinite(p.x) || !std::isfinite(p.y) || !std::isfinite(p.z)) {
         continue;
+      }
       auto & o = (*output)[out_idx++];
       Eigen::Vector3f out = tf * Eigen::Vector3f(p.x, p.y, p.z);
       o.x = out.x();

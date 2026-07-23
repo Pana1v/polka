@@ -3,6 +3,22 @@
 Investigation on the real moving bag `real_slam_20260713_155904_0.mcap` (99s, 3 LiDARs +
 3 IMUs, articulated chassis). Branch `ao/polka-9/deskew-perf-investigation` off `humble`.
 
+## Falsifiable summary
+
+- **Claim:** the optimization cuts per-source deskew latency from ~11.1-12.1ms to
+  ~8.5-9.9ms (86.4k pts/scan), a ~20% reduction, with no correctness regression.
+- **How to falsify it:** rebuild both `humble` (baseline) and this branch (optimized),
+  replay the same bag window, and check the `polka: perf source '<name>' deskew:
+  mean=...ms` log line. If optimized mean is not below baseline mean, the perf claim
+  is false.
+- **Correctness tolerance:** optimized-build deskew-ON output on a fixed, stamp-matched
+  scan must differ from baseline-build deskew-ON output on the *same* scan by less than
+  the baseline binary's own run-to-run noise floor. Measured: optimized-vs-baseline
+  mean 0.27cm / max 8.53cm, noise floor (baseline vs itself, rerun) mean 1.17cm / max
+  33.9cm. Optimized is within the noise floor on both axes, so the tolerance is met. If
+  a future change pushes optimized-vs-baseline past ~1.2cm mean or ~34cm max on this
+  same scan, treat it as a regression.
+
 ## Environment
 
 - Build/run: shared `isaac_ros_dev-x86_64-container` (ROS humble, CUDA 12.6 toolkit),
@@ -182,6 +198,51 @@ measurable correctness regression from the optimization.
   mean/max deskew-loop latency, logged every 50 calls.
 - `src/polka_node.cpp` / `include/polka/polka_node.hpp`: rolling mean/max merge-stage
   latency (CPU and CUDA paths), logged every 50 calls.
+- Repo-wide `ament_uncrustify --reformat` plus scripted header-guard renames and
+  include-order fixes across the package, to get CI's lint suite (cpplint, uncrustify)
+  green — these were pre-existing failures on `humble` itself (verified by running the
+  same checks against an unmodified `humble` checkout before touching anything),
+  unrelated to the deskew work, but blocking this PR's CI. `colcon test` now shows all
+  7 lint/style checks passing locally against this exact branch state.
+
+## Follow-up (specced, not implemented here)
+
+Even after skipping the left-Jacobian, the remaining cost is still one full SE(3)
+exponential map (`AngleAxisd` + `sin`/`cos` + rotation-matrix build + `Isometry3d`
+inverse + 3x3 matvec) **per point** — confirmed the dominant remaining cost by the
+bypass test in "Profiling" above (~8.3-9.3ms of the ~9-10ms optimized deskew loop, i.e.
+still ~85-90% of it). For one 86.4k-point scan at the measured per-source rate, that's
+roughly 95-110ns/point of transcendental-function work, repeated independently for
+every point even though within one scan `angular_vel` is fixed and only `dt` varies
+linearly with azimuth.
+
+**Proposed fix:** precompute `exp(ω·dt) [+ 0.5·a·dt² when accel is available]` at a
+coarse stride — e.g. once per ring, or every N-th point (N≈16-32) along the scan — and
+linearly interpolate the SE(3) delta (or just the rotation angle, since `ω` is constant
+within a scan and the rotation axis is fixed, so only the angle magnitude needs
+interpolating) for the points in between. This cuts transcendental-function calls by
+roughly the stride factor (~5-10x fewer `sin`/`cos`/`AngleAxisd` evaluations) at the
+cost of a bounded linear-interpolation error between anchor points, which is small
+because `dt` (and hence the rotation angle) varies smoothly and monotonically across
+a scan — the same continuity the current per-point exact computation exists to avoid
+losing wholesale.
+
+**Bounded accuracy loss:** worst case, the interpolation error is the second-derivative
+term dropped by linearizing `exp()` between anchors, which scales with `(stride ·
+Δdt)²·|ω|²/2` — for stride=16 points out of ~86.4k over a 100ms scan (Δdt per point
+≈1.16µs, so anchor spacing ≈18.5µs) and `|ω|` up to the peak ~0.74 rad/s measured in
+Part A, this is several orders of magnitude below the ~1cm displacement noise floor
+already established as acceptable above — i.e., the interpolation error should be
+undetectable against the existing measurement noise, but this needs to be verified
+empirically (compare interpolated vs exact per-point output, same tolerance framework
+as the re-check above) before merging, not assumed.
+
+**Where to implement:** `SourceAdapter::deskew_cloud()` in `src/source_adapter.cpp` —
+replace the per-point `compute_motion_delta(angular_vel, accel, dt)` call with a
+precompute pass every `kDeskewInterpStride` points, then interpolate between anchors
+for the points in between. Left unimplemented here due to context budget; specced
+concretely enough to build and measure directly against this report's tolerance
+framework.
 
 ## Verdict
 

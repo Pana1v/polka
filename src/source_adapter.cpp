@@ -13,26 +13,30 @@
 // limitations under the License.
 
 #include "polka/input/source_adapter.hpp"
-#include "polka/util/se3_exp.hpp"
-#include "polka/filters/filter_chain.hpp"
 
 #include <pcl_conversions/pcl_conversions.h>
-#include <sensor_msgs/msg/point_field.hpp>
-#include <tf2_eigen/tf2_eigen.hpp>
 
 #include <cstring>
 
-namespace polka {
+#include "polka/util/se3_exp.hpp"
+#include "polka/filters/filter_chain.hpp"
+#include <sensor_msgs/msg/point_field.hpp>
+#include <tf2_eigen/tf2_eigen.hpp>
 
-namespace {
+namespace polka
+{
+
+namespace
+{
 constexpr uint64_t kPerfLogInterval = 50;
 }
 
-SourceAdapter::SourceAdapter(rclcpp::Node * node, const SourceConfig & config, bool gpu_filters,
-                             ImuGetter imu_getter, bool deskew_enabled,
-                             const std::string & timestamp_field_hint,
-                             std::shared_ptr<tf2_ros::Buffer> tf_buffer,
-                             int imu_buffer_size)
+SourceAdapter::SourceAdapter(
+  rclcpp::Node * node, const SourceConfig & config, bool gpu_filters,
+  ImuGetter imu_getter, bool deskew_enabled,
+  const std::string & timestamp_field_hint,
+  std::shared_ptr<tf2_ros::Buffer> tf_buffer,
+  int imu_buffer_size)
 : node_(node), config_(config), logger_(node->get_logger()), gpu_filters_(gpu_filters),
   get_imu_(std::move(imu_getter)), deskew_enabled_(deskew_enabled),
   timestamp_field_hint_(timestamp_field_hint), tf_buffer_(std::move(tf_buffer))
@@ -41,9 +45,10 @@ SourceAdapter::SourceAdapter(rclcpp::Node * node, const SourceConfig & config, b
   if (deskew_enabled_ && !config.imu_topic.empty()) {
     local_imu_ = std::make_shared<ImuBuffer>(node, config.imu_topic, imu_buffer_size);
     get_imu_ = [this]() -> std::shared_ptr<const AveragedImu> {
-      return local_imu_->snapshot();
-    };
-    RCLCPP_INFO(logger_, "polka: source '%s' using per-source IMU on '%s'",
+        return local_imu_->snapshot();
+      };
+    RCLCPP_INFO(
+      logger_, "polka: source '%s' using per-source IMU on '%s'",
       config.name.c_str(), config.imu_topic.c_str());
   }
   // Build QoS
@@ -65,10 +70,12 @@ SourceAdapter::SourceAdapter(rclcpp::Node * node, const SourceConfig & config, b
       std::bind(&SourceAdapter::scan_callback, this, std::placeholders::_1));
   }
 
-  if (!gpu_filters_)
+  if (!gpu_filters_) {
     filters_ = build_filter_chain(config.filter_params);
+  }
 
-  RCLCPP_INFO(logger_, "polka: source '%s' subscribed to '%s' (%s), %zu filters%s",
+  RCLCPP_INFO(
+    logger_, "polka: source '%s' subscribed to '%s' (%s), %zu filters%s",
     config.name.c_str(), config.topic.c_str(),
     config.type == SourceType::POINTCLOUD2 ? "PointCloud2" : "LaserScan",
     filters_.size(),
@@ -79,20 +86,28 @@ bool SourceAdapter::validate_fields(const sensor_msgs::msg::PointCloud2 & msg)
 {
   bool has_x = false, has_y = false, has_z = false, has_intensity = false;
   for (const auto & field : msg.fields) {
-    if (field.name == "x" && field.datatype == sensor_msgs::msg::PointField::FLOAT32) has_x = true;
-    if (field.name == "y" && field.datatype == sensor_msgs::msg::PointField::FLOAT32) has_y = true;
-    if (field.name == "z" && field.datatype == sensor_msgs::msg::PointField::FLOAT32) has_z = true;
-    if (field.name == "intensity") has_intensity = true;
+    if (field.name == "x" && field.datatype == sensor_msgs::msg::PointField::FLOAT32) {
+      has_x = true;
+    }
+    if (field.name == "y" && field.datatype == sensor_msgs::msg::PointField::FLOAT32) {
+      has_y = true;
+    }
+    if (field.name == "z" && field.datatype == sensor_msgs::msg::PointField::FLOAT32) {
+      has_z = true;
+    }
+    if (field.name == "intensity") {has_intensity = true;}
   }
   if (!has_x || !has_y || !has_z) {
-    RCLCPP_ERROR(logger_,
+    RCLCPP_ERROR(
+      logger_,
       "polka: source '%s' missing required FLOAT32 x/y/z fields - dropping all messages",
       config_.name.c_str());
     return false;
   }
   missing_intensity_ = !has_intensity;
   if (missing_intensity_) {
-    RCLCPP_WARN(logger_,
+    RCLCPP_WARN(
+      logger_,
       "polka: source '%s' missing 'intensity' field - publishing with intensity=0",
       config_.name.c_str());
   }
@@ -120,11 +135,13 @@ void SourceAdapter::detect_timestamp_field(const sensor_msgs::msg::PointCloud2 &
     for (const auto & name : candidates) {
       if (field.name == name) {
         if (field.datatype == sensor_msgs::msg::PointField::FLOAT32 ||
-            field.datatype == sensor_msgs::msg::PointField::FLOAT64) {
+          field.datatype == sensor_msgs::msg::PointField::FLOAT64)
+        {
           has_timestamp_field_ = true;
           timestamp_field_offset_ = field.offset;
           timestamp_field_datatype_ = field.datatype;
-          RCLCPP_INFO(logger_,
+          RCLCPP_INFO(
+            logger_,
             "polka: source '%s' detected per-point timestamp field '%s' (offset=%u, %s)",
             config_.name.c_str(), field.name.c_str(), field.offset,
             field.datatype == sensor_msgs::msg::PointField::FLOAT64 ? "FLOAT64" : "FLOAT32");
@@ -134,7 +151,8 @@ void SourceAdapter::detect_timestamp_field(const sensor_msgs::msg::PointCloud2 &
     }
   }
 
-  RCLCPP_INFO(logger_,
+  RCLCPP_INFO(
+    logger_,
     "polka: source '%s' has no per-point timestamp field, per-point deskewing disabled",
     config_.name.c_str());
 }
@@ -162,9 +180,11 @@ void SourceAdapter::populate_point_time(
   // No per-point field (or layout we cannot index safely): every point inherits
   // the message header stamp. Same fallback used for projected LaserScan sources.
   if (!has_timestamp_field_ ||
-      n != static_cast<size_t>(raw_msg.width) * raw_msg.height) {
-    for (size_t i = 0; i < n; ++i)
+    n != static_cast<size_t>(raw_msg.width) * raw_msg.height)
+  {
+    for (size_t i = 0; i < n; ++i) {
       cloud[i].time = header_sec;
+    }
     return;
   }
 
@@ -185,13 +205,13 @@ void SourceAdapter::deskew_cloud(
   const AveragedImu & imu)
 {
   size_t n = cloud.size();
-  if (n == 0 || n != static_cast<size_t>(raw_msg.width) * raw_msg.height) return;
+  if (n == 0 || n != static_cast<size_t>(raw_msg.width) * raw_msg.height) {return;}
 
   // Rotate IMU data from IMU frame into sensor frame (identity if same frame or TF unavailable)
   Eigen::Matrix3d R_imu_to_sensor = Eigen::Matrix3d::Identity();
   if (tf_buffer_ && !imu.frame_id.empty()) {
     std::string sensor_frame;
-    { std::lock_guard<std::mutex> lock(meta_mutex_); sensor_frame = frame_id_; }
+    {std::lock_guard<std::mutex> lock(meta_mutex_); sensor_frame = frame_id_;}
     if (!sensor_frame.empty() && sensor_frame != imu.frame_id) {
       try {
         auto tf_msg = tf_buffer_->lookupTransform(
@@ -216,7 +236,7 @@ void SourceAdapter::deskew_cloud(
     // Interpret: if >1e8 it's absolute Unix time, otherwise relative offset from scan start
     double dt = (pt_time > 1e8) ? (pt_time - header_sec) : pt_time;
 
-    if (std::abs(dt) < 1e-9) continue;
+    if (std::abs(dt) < 1e-9) {continue;}
 
     Eigen::Isometry3d delta = compute_motion_delta(angular_vel, accel, dt);
     Eigen::Vector3d p(cloud[i].x, cloud[i].y, cloud[i].z);
@@ -253,11 +273,12 @@ void SourceAdapter::pc2_callback(sensor_msgs::msg::PointCloud2::ConstSharedPtr m
     fields_validated_ = true;
     fields_valid_ = validate_fields(*msg);
   }
-  if (!fields_valid_) return;
+  if (!fields_valid_) {return;}
 
   // Detect per-point timestamp field on first message
-  if (!timestamp_field_detected_)
+  if (!timestamp_field_detected_) {
     detect_timestamp_field(*msg);
+  }
 
   auto cloud = std::make_shared<CloudT>();
   pcl::fromROSMsg(*msg, *cloud);
@@ -277,7 +298,8 @@ void SourceAdapter::pc2_callback(sensor_msgs::msg::PointCloud2::ConstSharedPtr m
       deskew_total_us_ += us;
       deskew_max_us_ = std::max(deskew_max_us_, us);
       if (++deskew_calls_ % kPerfLogInterval == 0) {
-        RCLCPP_INFO(logger_,
+        RCLCPP_INFO(
+          logger_,
           "polka: perf source '%s' deskew: mean=%.3fms max=%.3fms (n=%zu pts, over %zu calls)",
           config_.name.c_str(), deskew_total_us_ / kPerfLogInterval / 1000.0,
           deskew_max_us_ / 1000.0, cloud->size(),
@@ -302,7 +324,7 @@ void SourceAdapter::scan_callback(sensor_msgs::msg::LaserScan::ConstSharedPtr ms
     fields_validated_ = true;
     fields_valid_ = validate_fields(pc2_msg);
   }
-  if (!fields_valid_) return;
+  if (!fields_valid_) {return;}
 
   auto cloud = std::make_shared<CloudT>();
   pcl::fromROSMsg(pc2_msg, *cloud);
@@ -325,7 +347,7 @@ std::string SourceAdapter::frame_id() const
 
 bool SourceAdapter::is_stale(double timeout_sec, const rclcpp::Time & now) const
 {
-  if (!has_received_.load()) return true;
+  if (!has_received_.load()) {return true;}
   std::lock_guard<std::mutex> lock(meta_mutex_);
   return (now - last_received_time_).seconds() > timeout_sec;
 }
@@ -340,8 +362,9 @@ void SourceAdapter::rebuild_filters(const FilterParams & fp)
 {
   config_.filter_params = fp;
   filters_.clear();
-  if (!gpu_filters_)
+  if (!gpu_filters_) {
     filters_ = build_filter_chain(fp);
+  }
 }
 
 }  // namespace polka

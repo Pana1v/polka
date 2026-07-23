@@ -15,22 +15,24 @@
 #ifndef POLKA__OUTPUT__SCAN_BUILDER_HPP_
 #define POLKA__OUTPUT__SCAN_BUILDER_HPP_
 
-#include "polka/types.hpp"
-
-#include <rclcpp/rclcpp.hpp>
-#include <sensor_msgs/msg/laser_scan.hpp>
-
 #include <string>
 #include <vector>
 
-namespace polka {
+#include "polka/types.hpp"
+#include <rclcpp/rclcpp.hpp>
+#include <sensor_msgs/msg/laser_scan.hpp>
+
+namespace polka
+{
 
 /// Builds sensor_msgs::LaserScan from a merged PointCloud2 or a pre-computed range vector.
 /// Centralises header assembly so both CPU and GPU paths share the same stamp/frame logic.
-class ScanBuilder {
+class ScanBuilder
+{
 public:
-  void configure(const ScanOutputConfig & cfg, double output_rate,
-                 const std::string & frame_id);
+  void configure(
+    const ScanOutputConfig & cfg, double output_rate,
+    const std::string & frame_id);
 
   /// Project a 3D cloud to a 2D LaserScan using the configured flatten parameters.
   sensor_msgs::msg::LaserScan from_cloud(

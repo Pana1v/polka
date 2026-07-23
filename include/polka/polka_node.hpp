@@ -15,17 +15,6 @@
 #ifndef POLKA__POLKA_NODE_HPP_
 #define POLKA__POLKA_NODE_HPP_
 
-#include "polka/types.hpp"
-#include "polka/config/config_loader.hpp"
-#include "polka/input/source_adapter.hpp"
-#include "polka/input/imu_buffer.hpp"
-#include "polka/merge_engine/i_merge_engine.hpp"
-#include "polka/output/output_pipeline.hpp"
-#include "polka/output/scan_builder.hpp"
-
-#include <rclcpp/rclcpp.hpp>
-#include <sensor_msgs/msg/point_cloud2.hpp>
-#include <sensor_msgs/msg/laser_scan.hpp>
 #include <tf2_ros/buffer.h>
 #include <tf2_ros/transform_listener.h>
 #include <Eigen/Geometry>
@@ -35,9 +24,22 @@
 #include <string>
 #include <vector>
 
-namespace polka {
+#include "polka/types.hpp"
+#include "polka/config/config_loader.hpp"
+#include "polka/input/source_adapter.hpp"
+#include "polka/input/imu_buffer.hpp"
+#include "polka/merge_engine/i_merge_engine.hpp"
+#include "polka/output/output_pipeline.hpp"
+#include "polka/output/scan_builder.hpp"
+#include <rclcpp/rclcpp.hpp>
+#include <sensor_msgs/msg/point_cloud2.hpp>
+#include <sensor_msgs/msg/laser_scan.hpp>
 
-class PolkaNode : public rclcpp::Node {
+namespace polka
+{
+
+class PolkaNode : public rclcpp::Node
+{
 public:
   explicit PolkaNode(const rclcpp::NodeOptions & options);
 

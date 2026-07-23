@@ -8,14 +8,15 @@
 
 #pragma once
 
-namespace polka {
+namespace polka
+{
 
 // Standard throttle windows (milliseconds) for RCLCPP_*_THROTTLE.
 //   fast   — per-message validation (e.g. non-finite IMU values)
 //   normal — steady-state degradation (e.g. stale source, TF failing)
 //   slow   — persistent suppressed state
-constexpr int kLogThrottleFastMs   = 1000;
+constexpr int kLogThrottleFastMs = 1000;
 constexpr int kLogThrottleNormalMs = 5000;
-constexpr int kLogThrottleSlowMs   = 30000;
+constexpr int kLogThrottleSlowMs = 30000;
 
 }  // namespace polka

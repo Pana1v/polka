@@ -2,6 +2,13 @@
 Changelog for package polka
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+Forthcoming
+-----------
+* Add per-feature demo GIFs (multi-LiDAR fusion, output filters, angular invert, self-filter, voxel downsample, dual output, 2D scan merge) generated from the TIERS multi-LiDAR dataset with a headless Open3D + gifski toolchain.
+* Slim the README to badges, demo gallery, and quick start; move parameter and pipeline detail into ``doc/CONFIGURATION.md`` and ``doc/PIPELINE.md``.
+* Consolidate documentation assets (docs, images, demo media) under ``doc/``.
+* Remove the superseded ``pipeline_demo.gif``.
+
 0.3.0 (2026-05-28)
 ------------------
 * Add CHANGELOG.rst (REP 132) and release metadata to package.xml (website / repository / bugtracker URLs, author tag); bump version to 0.3.0.

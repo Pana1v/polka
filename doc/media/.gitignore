@@ -1,0 +1,5 @@
+# Generated intermediates (regenerate with the scripts here)
+work/
+frames/
+__pycache__/
+*.pyc

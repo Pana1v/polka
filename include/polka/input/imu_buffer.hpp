@@ -60,6 +60,10 @@ private:
   int max_size_;
   rclcpp::Logger logger_;
   rclcpp::Clock::SharedPtr clock_;
+
+  // 体坐标系重力 EMA（无 orientation 时用静止比力均值估计）
+  Eigen::Vector3d g_body_ema_ = Eigen::Vector3d::Zero();
+  bool g_body_initialized_ = false;
 };
 
 }  // namespace polka

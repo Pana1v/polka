@@ -21,10 +21,10 @@ Investigation on the real moving bag `real_slam_20260713_155904_0.mcap` (99s, 3 
 
 ## Environment
 
-- Build/run: shared `isaac_ros_dev-x86_64-container` (ROS humble, CUDA 12.6 toolkit),
-  source copied to `/home/pan-navigator/workspaces/polka9_ws/src/polka`, bag hardlinked
-  in. Runtime tests isolated on `ROS_DOMAIN_ID=129` to avoid interfering with another
-  session's active nodes in the same container.
+- Build/run: a ROS humble container with the CUDA 12.6 toolkit, source checked out
+  into a workspace under `src/polka`, bag copied in locally. Runtime tests used a
+  dedicated `ROS_DOMAIN_ID` to avoid colliding with any other ROS graph on the same
+  host/network.
 - GPU is Blackwell (compute capability 12.0 / sm_120). The available CUDA 12.6 toolkit
   only supports up to `compute_90` SASS, and the repo's `CMAKE_CUDA_ARCHITECTURES`
   (`75;86;87`) doesn't cover sm_120 either way. Built CUDA with
@@ -77,8 +77,7 @@ independent attempts were inconclusive:
 - Odom-frame multi-scan accumulation (the intended check — deskew should sharpen a
   static structure viewed from a world-fixed frame across several scans) hit persistent
   TF instability (`"Detected jump back in time. Clearing TF buffer"` cascades) specific
-  to the `odom` frame in this container/bag combination that I could not resolve within
-  reasonable effort.
+  to the `odom` frame with this bag that I could not resolve within reasonable effort.
 - Comparing against the bag's recorded `/polka/merged_cloud` reference was invalidated
   by a config/filter mismatch (recorded stream has 30k pts/scan vs. my ~250k — the
   original recording used per-source filters I don't have, so ON and OFF were roughly
@@ -102,21 +101,22 @@ evidence of a sign/frame error, but I also could not positively rule one out wit
 tools available in the time spent. **This is the one open item in the gate** — flagging
 it explicitly rather than papering over it.
 
-No rviz screenshot pair was obtained: X11 forwarding into the shared container did not
-work within a reasonable debugging budget (`qt.qpa.xcb: could not connect to display`).
+No rviz screenshot pair was obtained: X11 forwarding into the container did not work
+within a reasonable debugging budget (`qt.qpa.xcb: could not connect to display`).
 Matplotlib visualizations of the same point sets were generated instead
-(`far_range_on_vs_off_62479.png`, `side_view_62_479.png` in the session scratchpad) but
-did not show an obvious visual smear/sharpen difference at the specific far-range
-region examined — consistent with that region being a poor place to *see* the effect
-(see far-range thickness note above); the quantitative displacement table above is the
+(`far_range_on_vs_off_62479.png`, `side_view_62_479.png`, not committed) but did not
+show an obvious visual smear/sharpen difference at the specific far-range region
+examined — consistent with that region being a poor place to *see* the effect (see
+far-range thickness note above); the quantitative displacement table above is the
 decisive evidence, not these images.
 
 ## Part B — Performance
 
 ### Profiling
 
-`perf` isn't packaged for this host's kernel (6.17.0-1028-oem, no matching
-`linux-tools`). Used a standalone microbenchmark plus an in-loop bypass test instead.
+`perf` wasn't available in the profiling environment used here (no matching
+`linux-tools` package for the running kernel). Used a standalone microbenchmark plus
+an in-loop bypass test instead.
 Bypassing `compute_motion_delta()` entirely (hardcoding an identity transform) dropped
 the per-scan deskew loop from ~10ms to ~0.7–1.3ms — **the SE(3) motion-delta computation
 accounts for ~85–90% of deskew's cost**, confirming it as the hottest stage.
@@ -136,8 +136,8 @@ way (`Isometry3d::Identity()`'s default).
 
 ### Baseline vs optimized (CPU, per-source deskew, mean over 50-call rolling windows)
 
-Clean back-to-back A/B (same container, same bag window, immediately sequential runs,
-to rule out time-varying system effects like thermal state):
+Clean back-to-back A/B (same machine, same bag window, immediately sequential runs, to
+rule out time-varying system effects like thermal state):
 
 | Stage | Baseline | Optimized | Change |
 |---|---|---|---|

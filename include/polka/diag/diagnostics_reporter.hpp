@@ -44,6 +44,14 @@ struct SourceReport {
   bool offset_valid = false;
   double stamp_offset_sec = 0.0;  // this stamp - peer median
   DriftTracker::Status drift;
+
+  // Capability flags, not health signals - what's actually active for this
+  // source right now (config intent, deskew also gated on runtime timestamp
+  // field detection). Absent (false) sources report every flag false too.
+  bool filter_range_enabled = false;
+  bool filter_angular_enabled = false;
+  bool filter_box_enabled = false;
+  bool deskew_active = false;
 };
 
 struct OutputReport {

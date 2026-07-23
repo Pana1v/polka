@@ -28,6 +28,7 @@ from collections import deque
 import curses
 import math
 import re
+import signal
 import struct
 import sys
 import threading
@@ -48,12 +49,17 @@ MAX_VIZ_POINTS = 4096
 FEED_CAPACITY = 200
 LEVEL_LABEL = {0: 'OK', 1: 'WARN', 2: 'ERROR', 3: 'STALE'}
 
+# Log.WARN etc. are declared `byte` in rcl_interfaces/msg/Log, which rclpy
+# represents as a single-byte `bytes` object, not an int like the `uint8`
+# level field on incoming messages. Normalize once so comparisons work.
+_LOG_WARN = Log.WARN[0] if isinstance(Log.WARN, bytes) else Log.WARN
+
 
 def parse_args():
     parser = argparse.ArgumentParser(
         description='Terminal dashboard for the polka multi-LiDAR fusion node.')
     parser.add_argument('--node', default='polka', help='polka node name (default: polka)')
-    parser.add_argument('--rate', type=float, default=1.0, help='redraws per second')
+    parser.add_argument('--rate', type=float, default=4.0, help='redraws per second (default: 4.0)')
     parser.add_argument('--diag-topic', default='/diagnostics')
     parser.add_argument('--cloud-topic', default='',
                         help='merged cloud topic (default: auto from diagnostics)')
@@ -163,23 +169,23 @@ class RosIO(Node):
                         continue
                     text = "source '%s': %s %s" % (
                         source, flag.replace('_', ' '), 'raised' if value else 'cleared')
-                    self.feed.appendleft((now, 1 if value else 0, text))
+                    self.feed.appendleft((now, 1 if value else 0, source, text))
             self._flag_state[source] = flags
         for gone in set(self._flag_state) - {
                 n[len('source '):] for n in ours if n.startswith('source ')}:
-            self.feed.appendleft((now, 0, "source '%s': removed" % gone))
+            self.feed.appendleft((now, 0, gone, "source '%s': removed" % gone))
             del self._flag_state[gone]
 
     def _on_rosout(self, msg):
-        if msg.name != self.args.node or msg.level < Log.WARN:
+        if msg.name != self.args.node or msg.level < _LOG_WARN:
             return
-        severity = 1 if msg.level == Log.WARN else 2
+        severity = 1 if msg.level == _LOG_WARN else 2
         match = re.search(r"source '([^']+)'", msg.msg)
-        tag = match.group(1) if match else '-'
-        text = '[%s] %s' % (tag, msg.msg)
+        tag = match.group(1) if match else None
+        text = '[%s] %s' % (tag or '-', msg.msg)
         with self.lock:
             self.saw_node = True
-            self.feed.appendleft((time.time(), severity, text))
+            self.feed.appendleft((time.time(), severity, tag, text))
 
     def snapshot(self):
         with self.lock:
@@ -334,6 +340,38 @@ def output_rows(statuses):
     return rows
 
 
+def capabilities_lines(statuses):
+    """Lines for the left-hand 'capabilities' column: engine, outputs, and
+    per-source type/rate-mode/filters/deskew, all straight from /diagnostics."""
+    node = statuses.get('node')
+    out = statuses.get('output')
+    node_keys = {kv.key: kv.value for kv in node.values} if node else {}
+    out_keys = {kv.key: kv.value for kv in out.values} if out else {}
+    lines = [
+        'engine:    %s' % node_keys.get('engine', '?'),
+        'cloud out: %s' % (out_keys.get('cloud_topic') or 'disabled'),
+        'scan out:  %s' % (out_keys.get('scan_topic') or 'disabled'),
+    ]
+    for name in sorted(n for n in statuses if n.startswith('source ')):
+        keys = {kv.key: kv.value for kv in statuses[name].values}
+        short = name[len('source '):]
+        lines.append('')
+        lines.append('%s (%s/%s)' % (short, keys.get('type', '?'),
+                                      keys.get('expected_rate_source', '?')))
+        active = [label for label, key in (
+            ('range', 'filter_range_enabled'),
+            ('angular', 'filter_angular_enabled'),
+            ('box', 'filter_box_enabled'),
+        ) if keys.get(key) == 'true']
+        lines.append('  filters: %s' % (','.join(active) if active else 'none'))
+        lines.append('  deskew:  %s' % (
+            'on' if keys.get('deskew_active') == 'true' else 'off'))
+    return lines
+
+
+_SOURCE_PALETTE = (5, 6, 7)  # curses color pair ids, assigned to sources as seen
+
+
 class Dashboard:
 
     def __init__(self, ros, args):
@@ -343,6 +381,32 @@ class Dashboard:
         self.show_viz = not args.no_viz
         self.paused = False
         self.extent = None
+        self._source_colors = {}   # source name -> curses color pair id
+        # Decoding a PointCloud2/LaserScan is the expensive part of a redraw;
+        # cache by raw-bytes identity so a higher --rate doesn't re-decode
+        # the same message every frame when the topic itself publishes slower.
+        self._cloud_cache_raw = None
+        self._cloud_cache_points = []
+        self._scan_cache_raw = None
+        self._scan_cache_points = []
+
+    def _color_for_source(self, name):
+        if name not in self._source_colors:
+            idx = len(self._source_colors) % len(_SOURCE_PALETTE)
+            self._source_colors[name] = _SOURCE_PALETTE[idx]
+        return self._source_colors[name]
+
+    def _decode_cloud_cached(self, raw):
+        if raw is not self._cloud_cache_raw:
+            self._cloud_cache_raw = raw
+            self._cloud_cache_points = decode_cloud(raw) if raw else []
+        return self._cloud_cache_points
+
+    def _decode_scan_cached(self, raw):
+        if raw is not self._scan_cache_raw:
+            self._scan_cache_raw = raw
+            self._scan_cache_points = decode_scan(raw) if raw else []
+        return self._scan_cache_points
 
     def run(self, stdscr):
         curses.curs_set(0)
@@ -352,6 +416,9 @@ class Dashboard:
         curses.init_pair(2, curses.COLOR_YELLOW, -1)
         curses.init_pair(3, curses.COLOR_RED, -1)
         curses.init_pair(4, curses.COLOR_CYAN, -1)
+        curses.init_pair(5, curses.COLOR_MAGENTA, -1)
+        curses.init_pair(6, curses.COLOR_BLUE, -1)
+        curses.init_pair(7, curses.COLOR_WHITE, -1)
         stdscr.nodelay(True)
         period = 1.0 / max(self.args.rate, 0.1)
         while True:
@@ -394,20 +461,43 @@ class Dashboard:
             stdscr.refresh()
             return
 
-        viz_width = (width * 55 // 100) if (self.show_viz and width >= 100) else 0
+        body_height = height - 1
         self._draw_status_bar(stdscr, state, height - 1, width)
+
+        # Three columns on wide terminals: capabilities | viz | table+feed.
+        # Narrower terminals drop the capabilities column entirely rather
+        # than squeezing three panes into too little space.
+        cap_width = 32 if width >= 130 else 0
+        x = 0
+        if cap_width:
+            self._draw_capabilities(stdscr, state, 0, 0, cap_width, body_height)
+            x = cap_width + 1
+
+        remaining = width - x
+        viz_width = (remaining * 55 // 100) if (self.show_viz and remaining >= 100) else 0
         if viz_width:
-            self._draw_views(stdscr, state, 0, 0, height - 1, viz_width)
-        right_x = viz_width + (1 if viz_width else 0)
-        self._draw_right(stdscr, state, right_x, width - right_x, height - 1)
-        if viz_width:
-            for y in range(height - 1):
-                stdscr.addch(y, viz_width, curses.ACS_VLINE)
+            self._draw_views(stdscr, state, 0, x, body_height, viz_width)
+        right_x = x + viz_width + (1 if viz_width else 0)
+        self._draw_right(stdscr, state, right_x, width - right_x, body_height)
+
+        for y in range(body_height):
+            if cap_width:
+                stdscr.addch(y, cap_width, curses.ACS_VLINE)
+            if viz_width:
+                stdscr.addch(y, x + viz_width, curses.ACS_VLINE)
         stdscr.refresh()
 
+    def _draw_capabilities(self, stdscr, state, y0, x0, width, height):
+        stdscr.addstr(y0, x0, ' capabilities'[:width - 1], curses.A_UNDERLINE)
+        for i, line in enumerate(capabilities_lines(state['statuses'])):
+            row = y0 + 1 + i
+            if row >= y0 + height:
+                break
+            stdscr.addstr(row, x0, (' ' + line)[:width - 1], curses.A_DIM)
+
     def _draw_views(self, stdscr, state, y0, x0, height, width):
-        cloud = decode_cloud(state['cloud_raw']) if state['cloud_raw'] else []
-        scan = decode_scan(state['scan_raw']) if state['scan_raw'] else []
+        cloud = self._decode_cloud_cached(state['cloud_raw'])
+        scan = self._decode_scan_cached(state['scan_raw'])
         self.extent = compute_extent(cloud, self.fixed_extent, self.extent)
         extent = self.extent
 
@@ -471,7 +561,6 @@ class Dashboard:
             line = ' %-10s %6s %9s  points_out=%s' % (name, _num(rate), bw, points)
             stdscr.addstr(row, x0, line[:width - 1], curses.color_pair(4))
             row += 1
-
         row += 1
         title = ' warnings %s' % ('(paused)' if self.paused else '')
         stdscr.addstr(row, x0, title[:width - 1], curses.A_UNDERLINE)
@@ -480,15 +569,20 @@ class Dashboard:
             self._feed_cache = state['feed']
         feed = getattr(self, '_feed_cache', state['feed'])
         last_text = None
-        for (stamp, severity, text) in feed:
+        for (stamp, severity, source, text) in feed:
             if row >= height:
                 break
             if text == last_text:
                 continue
             last_text = text
-            color = curses.color_pair({0: 1, 1: 2}.get(severity, 3))
+            if source:
+                color = curses.color_pair(self._color_for_source(source))
+            else:
+                color = curses.color_pair({0: 1, 1: 2}.get(severity, 3))
+            attr = curses.A_BOLD if severity == 2 else (
+                curses.A_DIM if severity == 0 else 0)
             clock = time.strftime('%H:%M:%S', time.localtime(stamp))
-            stdscr.addstr(row, x0, (' %s %s' % (clock, text))[:width - 1], color)
+            stdscr.addstr(row, x0, (' %s %s' % (clock, text))[:width - 1], color | attr)
             row += 1
 
     def _draw_status_bar(self, stdscr, state, y, width):
@@ -517,6 +611,17 @@ def main():
         sys.stderr.write(
             'polka_monitor: needs a terminal (run it from an interactive shell)\n')
         return 2
+
+    # Python's default SIGTERM action kills the process with no cleanup at
+    # all, unlike SIGINT (KeyboardInterrupt, which curses.wrapper's finally
+    # catches to restore the terminal). A launch shutdown escalating to
+    # SIGTERM would otherwise leave the terminal stuck in raw/alt-screen
+    # mode after the process is already gone. Route it through the same
+    # clean path.
+    def _on_sigterm(signum, frame):
+        raise KeyboardInterrupt
+
+    signal.signal(signal.SIGTERM, _on_sigterm)
 
     rclpy.init()
     ros = RosIO(args)

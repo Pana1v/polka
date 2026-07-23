@@ -14,6 +14,7 @@
 
 import os
 
+from ament_index_python.packages import get_package_prefix
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
@@ -71,9 +72,15 @@ def generate_launch_description():
         # ros2 launch pipes child stdio (no controlling TTY, no stdin), which curses
         # needs. Re-attach the monitor to the real terminal via /dev/tty so it can draw
         # and read keys. Standalone `ros2 run polka polka_monitor` needs none of this.
+        # Exec the installed script directly (not through `ros2 run`, which forks its
+        # own child process) so this action tracks a single PID launch can reliably
+        # signal on shutdown - going through ros2 run left an orphaned polka_monitor
+        # process behind on Ctrl-C, since launch's SIGINT/SIGTERM never reached the
+        # grandchild it spawns.
         ExecuteProcess(
             cmd=['bash', '-c',
-                 'exec ros2 run polka polka_monitor --node polka </dev/tty >/dev/tty 2>&1'],
+                 'exec "%s" --node polka </dev/tty >/dev/tty 2>&1' % os.path.join(
+                     get_package_prefix('polka'), 'lib', 'polka', 'polka_monitor')],
             output='screen',
             condition=IfCondition(dashboard),
         ),

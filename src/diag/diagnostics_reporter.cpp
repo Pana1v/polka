@@ -181,6 +181,10 @@ void DiagnosticsReporter::publish(
     st.values.push_back(kv("stale", bool_str(src.stale)));
     st.values.push_back(kv("timing_drift", bool_str(src.drift.timing_drift)));
     st.values.push_back(kv("rate_drift", bool_str(src.drift.rate_drift)));
+    st.values.push_back(kv("filter_range_enabled", bool_str(src.filter_range_enabled)));
+    st.values.push_back(kv("filter_angular_enabled", bool_str(src.filter_angular_enabled)));
+    st.values.push_back(kv("filter_box_enabled", bool_str(src.filter_box_enabled)));
+    st.values.push_back(kv("deskew_active", bool_str(src.deskew_active)));
     array.status.push_back(std::move(st));
   }
 

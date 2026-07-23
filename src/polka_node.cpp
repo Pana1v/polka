@@ -496,6 +496,10 @@ void PolkaNode::diag_callback()
 
     r.frame_id = slot.adapter->frame_id();
     r.fields_invalid = slot.adapter->fields_invalid();
+    r.filter_range_enabled = sc.filter_params.range_filter_enabled;
+    r.filter_angular_enabled = sc.filter_params.angular_filter_enabled;
+    r.filter_box_enabled = sc.filter_params.box_filter_enabled;
+    r.deskew_active = slot.adapter->deskew_active();
     r.ever_received = snap.received;
     r.receive_overdue = !snap.received &&
       std::chrono::duration<double>(steady_now - slot.created_at).count() > receive_grace_sec;
@@ -548,8 +552,8 @@ void PolkaNode::diag_callback()
 
   OutputReport out;
   out.engine = merge_engine_->is_gpu() ? "CUDA" : "CPU";
-  out.cloud_topic = cloud_pub_ ? config_.cloud_output.topic : "";
-  out.scan_topic = scan_pub_ ? config_.scan_output.topic : "";
+  out.cloud_topic = cloud_pub_ ? cloud_pub_->get_topic_name() : "";
+  out.scan_topic = scan_pub_ ? scan_pub_->get_topic_name() : "";
   out.cloud_rates = cloud_out_window_.update(cloud_out_counters_.sample(), now_steady_sec);
   out.scan_rates = scan_out_window_.update(scan_out_counters_.sample(), now_steady_sec);
   out.points_in = last_points_in_;

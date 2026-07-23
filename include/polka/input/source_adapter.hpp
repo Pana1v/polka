@@ -62,6 +62,9 @@ public:
   // True once a message arrived whose fields failed validation (the source
   // drops everything from then on) - surfaced as a diagnostics ERROR.
   bool fields_invalid() const { return fields_validated_ && !fields_valid_; }
+  // True only once deskewing is both configured on and this source's actual
+  // messages were found to carry a usable per-point timestamp field.
+  bool deskew_active() const { return deskew_enabled_ && has_timestamp_field_; }
 
 private:
   void pc2_callback(sensor_msgs::msg::PointCloud2::ConstSharedPtr msg);

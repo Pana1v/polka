@@ -322,7 +322,8 @@ polka publishes `diagnostic_msgs/DiagnosticArray` on `/diagnostics` (default
 - **`polka: node`** — engine (CPU/CUDA), fresh/pending source counts, uptime, reconfigure count
 - **`polka: output`** — publish rate, output bandwidth, points in/out per tick, last-publish age
 - **`polka: source <name>`** — per-source rate, bandwidth, message age, stamp offset
-  vs. peer median, filter drop percentage, and status (`OK`, stale, pending, drifting)
+  vs. peer median, filter drop percentage, status (`OK`, stale, pending, drifting),
+  and which capabilities are actually active (range/angular/box filters, deskewing)
 
 Two drift detectors run per source, each raising a `WARN` diagnostic plus a log
 line only after `min_ticks` consecutive bad ticks (and clearing with
@@ -348,15 +349,21 @@ automatically from the diagnostics), so it never adds load to the merge path.
 
 ```bash
 ros2 run polka polka_monitor            # any terminal, while polka runs
-ros2 run polka polka_monitor --node polka --rate 1.0
+ros2 run polka polka_monitor --node polka --rate 4.0   # redraws/sec, default 4.0
 ```
 
-- **Left**: Braille-rendered top (x-y) and side (x-z) views of the merged
-  cloud, with the merged scan overlaid on the top view. Density shades the dots;
-  the extent auto-scales (toggle to a fixed extent with `f`).
+On terminals at least 130 columns wide, the dashboard lays out in three
+columns; narrower terminals drop the capabilities column:
+
+- **Left — capabilities**: engine (CPU/CUDA), output topics, and per-source
+  type/rate-mode/active-filters/deskew status, straight from `/diagnostics`.
+- **Middle — views**: Braille-rendered top (x-y) and side (x-z) views of the
+  merged cloud, with the merged scan overlaid on the top view. Density shades
+  the dots; the extent auto-scales (toggle to a fixed extent with `f`).
 - **Right**: a per-source table (rate, bandwidth, message age, stamp offset,
-  filter drop %) colored by status, plus a live warning feed that merges
-  polka's `/rosout` warnings with stale/drift transitions.
+  filter drop %) colored by status, plus a live warning feed colored per
+  source (when the message names one) that merges polka's `/rosout` warnings
+  with stale/drift transitions.
 - **Keys**: `q` quit, `f` fixed/auto extent, `v` toggle views, `p` pause feed.
 
 It is opt-in and changes nothing about the node's normal operation. To run it in

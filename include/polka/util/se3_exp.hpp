@@ -70,7 +70,12 @@ inline Eigen::Isometry3d se3_exp(const Eigen::Vector3d & rho,
   }
 
   T.linear() = Eigen::AngleAxisd(theta, phi / theta).toRotationMatrix();
-  T.translation() = so3_left_jacobian(phi) * rho;
+  // V * 0 == 0 regardless of V, so skip the left Jacobian (norm, hat, two
+  // trig evaluations, matrix square) whenever there's no translation to
+  // apply — the common case when gravity can't be subtracted (no IMU
+  // orientation) and deskewing falls back to rotation-only.
+  if (rho.squaredNorm() > 0.0)
+    T.translation() = so3_left_jacobian(phi) * rho;
   return T;
 }
 

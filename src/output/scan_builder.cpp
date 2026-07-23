@@ -17,7 +17,8 @@
 #include <cmath>
 #include <limits>
 
-namespace polka {
+namespace polka
+{
 
 void ScanBuilder::configure(
   const ScanOutputConfig & cfg, double output_rate, const std::string & frame_id)
@@ -60,13 +61,13 @@ sensor_msgs::msg::LaserScan ScanBuilder::from_cloud(
   scan.ranges.assign(n, std::numeric_limits<float>::infinity());
 
   for (const auto & p : *cloud) {
-    if (p.z < z_min || p.z > z_max) continue;
+    if (p.z < z_min || p.z > z_max) {continue;}
     float az = std::atan2(p.y, p.x);
-    if (az < a_min || az > a_max) continue;
+    if (az < a_min || az > a_max) {continue;}
     int bin = static_cast<int>((az - a_min) / a_inc);
-    if (bin < 0 || bin >= n) continue;
+    if (bin < 0 || bin >= n) {continue;}
     float range = std::sqrt(p.x * p.x + p.y * p.y);
-    if (range < r_min || range > r_max) continue;
+    if (range < r_min || range > r_max) {continue;}
     scan.ranges[bin] = std::min(scan.ranges[bin], range);
   }
   return scan;

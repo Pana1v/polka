@@ -15,7 +15,8 @@
 #include "polka/filters/angular_filter.hpp"
 #include <cmath>
 
-namespace polka {
+namespace polka
+{
 
 AngularFilter::AngularFilter(
   const std::vector<std::pair<double, double>> & ranges_deg, bool invert)
@@ -27,9 +28,9 @@ bool AngularFilter::in_ranges(double angle_deg) const
 {
   for (const auto & r : ranges_deg_) {
     if (r.first <= r.second) {
-      if (angle_deg >= r.first && angle_deg <= r.second) return true;
+      if (angle_deg >= r.first && angle_deg <= r.second) {return true;}
     } else {
-      if (angle_deg >= r.first || angle_deg <= r.second) return true;
+      if (angle_deg >= r.first || angle_deg <= r.second) {return true;}
     }
   }
   return false;
@@ -42,7 +43,7 @@ void AngularFilter::apply(CloudT & cloud, const std::string & /*frame_id*/)
     const auto & p = cloud[i];
     double angle_rad = std::atan2(static_cast<double>(p.y), static_cast<double>(p.x));
     double angle_deg = angle_rad * 180.0 / M_PI;
-    if (angle_deg < 0.0) angle_deg += 360.0;
+    if (angle_deg < 0.0) {angle_deg += 360.0;}
 
     bool match = in_ranges(angle_deg);
     bool keep = invert_ ? !match : match;

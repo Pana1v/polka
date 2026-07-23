@@ -24,15 +24,16 @@
 #include <Eigen/Geometry>
 #include <cmath>
 
-namespace polka {
+namespace polka
+{
 
 /// Skew-symmetric matrix [v]_x such that [v]_x * w = v x w.
 inline Eigen::Matrix3d hat(const Eigen::Vector3d & v)
 {
   Eigen::Matrix3d m;
-  m <<     0, -v.z(),  v.y(),
-       v.z(),      0, -v.x(),
-      -v.y(),  v.x(),      0;
+  m << 0, -v.z(), v.y(),
+    v.z(), 0, -v.x(),
+    -v.y(), v.x(), 0;
   return m;
 }
 
@@ -44,8 +45,9 @@ inline Eigen::Matrix3d so3_left_jacobian(const Eigen::Vector3d & phi)
   double theta = phi.norm();
   Eigen::Matrix3d Phi = hat(phi);
 
-  if (theta < 1e-10)
+  if (theta < 1e-10) {
     return Eigen::Matrix3d::Identity() + 0.5 * Phi;
+  }
 
   double theta2 = theta * theta;
   double a = (1.0 - std::cos(theta)) / theta2;
@@ -58,8 +60,9 @@ inline Eigen::Matrix3d so3_left_jacobian(const Eigen::Vector3d & phi)
 ///   ρ: translational component
 ///   φ: rotational component (axis-angle, ‖φ‖ = rotation angle)
 /// Returns T such that T.translation() = V * ρ and T.rotation() = exp(φ).
-inline Eigen::Isometry3d se3_exp(const Eigen::Vector3d & rho,
-                                 const Eigen::Vector3d & phi)
+inline Eigen::Isometry3d se3_exp(
+  const Eigen::Vector3d & rho,
+  const Eigen::Vector3d & phi)
 {
   Eigen::Isometry3d T = Eigen::Isometry3d::Identity();
   double theta = phi.norm();

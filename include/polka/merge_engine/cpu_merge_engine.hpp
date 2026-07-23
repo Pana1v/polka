@@ -15,14 +15,18 @@
 #ifndef POLKA__MERGE_ENGINE__CPU_MERGE_ENGINE_HPP_
 #define POLKA__MERGE_ENGINE__CPU_MERGE_ENGINE_HPP_
 
+#include <vector>
+
 #include "polka/merge_engine/i_merge_engine.hpp"
 
-namespace polka {
+namespace polka
+{
 
-class CpuMergeEngine : public IMergeEngine {
+class CpuMergeEngine : public IMergeEngine
+{
 public:
   CloudT::Ptr merge(const std::vector<MergeInput> & sources) override;
-  bool is_gpu() const override { return false; }
+  bool is_gpu() const override {return false;}
 };
 
 }  // namespace polka

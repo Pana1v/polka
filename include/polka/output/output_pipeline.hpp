@@ -15,19 +15,21 @@
 #ifndef POLKA__OUTPUT__OUTPUT_PIPELINE_HPP_
 #define POLKA__OUTPUT__OUTPUT_PIPELINE_HPP_
 
-#include "polka/types.hpp"
-#include "polka/filters/i_filter.hpp"
-#include "polka/merge_engine/i_merge_engine.hpp"
-
 #include <memory>
 #include <string>
 #include <vector>
 
-namespace polka {
+#include "polka/types.hpp"
+#include "polka/filters/i_filter.hpp"
+#include "polka/merge_engine/i_merge_engine.hpp"
+
+namespace polka
+{
 
 /// CPU post-merge processing pipeline: output filters → height cap → voxel downsample.
 /// Also builds PipelineConfig for the GPU engine path.
-class OutputPipeline {
+class OutputPipeline
+{
 public:
   void configure(const CloudOutputConfig & cfg);
 

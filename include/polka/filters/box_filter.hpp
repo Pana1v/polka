@@ -12,18 +12,24 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#ifndef POLKA__FILTERS__BOX_FILTER_HPP
-#define POLKA__FILTERS__BOX_FILTER_HPP
+#ifndef POLKA__FILTERS__BOX_FILTER_HPP_
+#define POLKA__FILTERS__BOX_FILTER_HPP_
 
-#include "polka/filters/i_filter.hpp"
 #include <Eigen/Core>
 
-namespace polka {
+#include <string>
 
-class BoxFilter : public IFilter {
+#include "polka/filters/i_filter.hpp"
+
+namespace polka
+{
+
+class BoxFilter : public IFilter
+{
 public:
-  BoxFilter(const Eigen::Vector3d & box_min, const Eigen::Vector3d & box_max,
-            bool invert = false);
+  BoxFilter(
+    const Eigen::Vector3d & box_min, const Eigen::Vector3d & box_max,
+    bool invert = false);
   void apply(CloudT & cloud, const std::string & frame_id) override;
 
 private:
@@ -33,4 +39,4 @@ private:
 
 }  // namespace polka
 
-#endif  // POLKA__FILTERS__BOX_FILTER_HPP
+#endif  // POLKA__FILTERS__BOX_FILTER_HPP_

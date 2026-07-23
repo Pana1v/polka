@@ -31,6 +31,7 @@ import re
 import signal
 import struct
 import sys
+import textwrap
 import threading
 import time
 
@@ -305,7 +306,13 @@ def human_bps(value):
 
 
 def source_rows(statuses):
-    """[(name, rate, bandwidth, age, offset, drop, label, level)] per source."""
+    """[(name, rate, age, offset, label, level)] per source.
+
+    Bandwidth and filter-drop% are published on /diagnostics for external
+    tools but dropped from this table: bandwidth rarely changes an operator's
+    next action, and drop% reads as a confusing -1 on GPU builds (per-source
+    filtering runs inside the CUDA merge engine, so the kept count is unknown).
+    """
     rows = []
     for name in sorted(n for n in statuses if n.startswith('source ')):
         status = statuses[name]
@@ -314,10 +321,8 @@ def source_rows(statuses):
         rows.append((
             name[len('source '):],
             keys.get('rate_hz', '-'),
-            human_bps(keys.get('bandwidth_Bps')),
             keys.get('msg_age_sec', '-'),
             keys.get('stamp_offset_ewma_sec', '-'),
-            keys.get('filter_drop_pct', '-'),
             status.message,
             level,
         ))
@@ -352,6 +357,12 @@ def capabilities_lines(statuses):
         'cloud out: %s' % (out_keys.get('cloud_topic') or 'disabled'),
         'scan out:  %s' % (out_keys.get('scan_topic') or 'disabled'),
     ]
+    imu = statuses.get('imu')
+    if imu:
+        ikeys = {kv.key: kv.value for kv in imu.values}
+        lines.append('imu:       %s' % ikeys.get('topic', '?'))
+        lines.append('  rate: %s hz  valid: %s' % (
+            ikeys.get('rate_hz', '-'), ikeys.get('valid', '?')))
     for name in sorted(n for n in statuses if n.startswith('source ')):
         keys = {kv.key: kv.value for kv in statuses[name].values}
         short = name[len('source '):]
@@ -501,8 +512,14 @@ class Dashboard:
         self.extent = compute_extent(cloud, self.fixed_extent, self.extent)
         extent = self.extent
 
-        top_h = max(4, (height - 4) * 2 // 3)
-        side_h = max(3, height - 4 - top_h)
+        # 3 stacked panels: top (cloud x-y, scan overlaid), side (cloud x-z),
+        # and a dedicated scan-only panel so the scan isn't lost in the cloud
+        # overlay. Overhead is 3 label rows + 2 blank spacer rows between panels.
+        usable = max(9, height - 5)
+        top_h = max(3, usable * 45 // 100)
+        side_h = max(3, usable * 25 // 100)
+        scan_h = max(3, usable - top_h - side_h)
+
         label = 'auto' if not self.fixed_extent else 'fixed'
         stdscr.addstr(y0, x0, ' top view (x up, y left)  extent %.1fm [%s]'
                       % (extent, label), curses.A_UNDERLINE)
@@ -516,6 +533,8 @@ class Dashboard:
             for x, y in scan:
                 overlay.plot(0.5 - y / (2 * extent), 0.5 - x / (2 * extent))
             self._blit(stdscr, overlay, y0 + 1, x0, curses.color_pair(4))
+        if not cloud:
+            stdscr.addstr(y0 + 2, x0 + 2, 'waiting for merged cloud...', curses.A_DIM)
 
         side_y = y0 + top_h + 2
         stdscr.addstr(side_y, x0, ' side view (z up, x right)', curses.A_UNDERLINE)
@@ -523,8 +542,15 @@ class Dashboard:
         for x, _, z in cloud:
             canvas.plot(0.5 + x / (2 * extent), 0.5 - z / (2 * extent))
         self._blit(stdscr, canvas, side_y + 1, x0, 0)
-        if not cloud:
-            stdscr.addstr(y0 + 2, x0 + 2, 'waiting for merged cloud...', curses.A_DIM)
+
+        scan_y = side_y + side_h + 2
+        stdscr.addstr(scan_y, x0, ' scan view (merged LaserScan only)', curses.A_UNDERLINE)
+        canvas = Braille(width - 1, scan_h)
+        for x, y in scan:
+            canvas.plot(0.5 - y / (2 * extent), 0.5 - x / (2 * extent))
+        self._blit(stdscr, canvas, scan_y + 1, x0, curses.color_pair(4))
+        if not scan:
+            stdscr.addstr(scan_y + 2, x0 + 2, 'waiting for merged scan...', curses.A_DIM)
 
     @staticmethod
     def _blit(stdscr, canvas, y0, x0, color):
@@ -544,14 +570,14 @@ class Dashboard:
             stdscr.addstr(1, x0 + 1, hint[:width - 2], curses.A_DIM)
             return
 
-        header = ' %-10s %6s %9s %6s %8s %5s' % (
-            'source', 'hz', 'bw', 'age', 'offset', 'drop%')
+        header = ' %-10s %6s %8s %8s' % (
+            'source', 'hz', 'age', 'offset')
         stdscr.addstr(row, x0, header[:width - 1], curses.A_UNDERLINE)
         row += 1
-        for (name, rate, bw, age, offset, drop, label, level) in source_rows(statuses):
+        for (name, rate, age, offset, label, level) in source_rows(statuses):
             color = curses.color_pair({0: 1, 1: 2}.get(level, 3))
-            line = ' %-10s %6s %9s %6s %8s %5s' % (
-                name[:10], _num(rate), bw, _num(age), _num(offset), drop)
+            line = ' %-10s %6s %8s %8s' % (
+                name[:10], _num(rate), _num(age), _num(offset))
             stdscr.addstr(row, x0, line[:width - 1], color)
             row += 1
             if level != 0:
@@ -582,8 +608,14 @@ class Dashboard:
             attr = curses.A_BOLD if severity == 2 else (
                 curses.A_DIM if severity == 0 else 0)
             clock = time.strftime('%H:%M:%S', time.localtime(stamp))
-            stdscr.addstr(row, x0, (' %s %s' % (clock, text))[:width - 1], color | attr)
-            row += 1
+            prefix = ' %s ' % clock
+            avail = max(10, width - 1 - len(prefix))
+            for i, line in enumerate(textwrap.wrap(text, width=avail) or ['']):
+                if row >= height:
+                    break
+                rendered = (prefix + line) if i == 0 else (' ' * len(prefix) + line)
+                stdscr.addstr(row, x0, rendered[:width - 1], color | attr)
+                row += 1
 
     def _draw_status_bar(self, stdscr, state, y, width):
         node_status = state['statuses'].get('node')

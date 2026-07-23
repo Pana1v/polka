@@ -574,7 +574,19 @@ void PolkaNode::diag_callback()
   nr.uptime_sec = std::chrono::duration<double>(steady_now - start_steady_).count();
   nr.reconfig_count = reconfig_count_;
 
-  diag_reporter_->publish(nr, out, reports, now);
+  ImuReport imu_rep;
+  imu_rep.enabled = global_imu_ != nullptr;
+  if (imu_rep.enabled) {
+    imu_rep.topic = global_imu_->topic();
+    auto imu_rates = imu_stat_window_.update(
+      StatSample{global_imu_->msg_count(), 0, 0, 0}, now_steady_sec);
+    imu_rep.rate_hz = imu_rates.valid ? imu_rates.msg_hz : -1.0;
+    auto snap = global_imu_->snapshot();
+    imu_rep.valid = snap && snap->valid;
+    imu_rep.msg_age_sec = imu_rep.valid ? (now - global_imu_->last_stamp()).seconds() : -1.0;
+  }
+
+  diag_reporter_->publish(nr, out, imu_rep, reports, now);
 }
 
 void PolkaNode::diagnose_clock_health(const rclcpp::Time & now)

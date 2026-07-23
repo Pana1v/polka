@@ -52,6 +52,8 @@ polka publishes `diagnostic_msgs/DiagnosticArray` on `/diagnostics` (default
 
 - **`polka: node`** — engine (CPU/CUDA), fresh/pending source counts, uptime, reconfigure count
 - **`polka: output`** — publish rate, output bandwidth, points in/out per tick, last-publish age
+- **`polka: imu`** — published only when `motion_compensation` is enabled with a resolved
+  IMU topic: that topic, message rate, and whether a usable sample has ever been received
 - **`polka: source <name>`** — per-source rate, bandwidth, message age, stamp offset
   vs. peer median, filter drop percentage, status (`OK`, stale, pending, drifting),
   and which capabilities are actually active (range/angular/box filters, deskewing)
@@ -86,15 +88,17 @@ ros2 run polka polka_monitor --node polka --rate 4.0   # redraws/sec, default 4.
 On terminals at least 130 columns wide, the dashboard lays out in three
 columns; narrower terminals drop the capabilities column:
 
-- **Left — capabilities**: engine (CPU/CUDA), output topics, and per-source
-  type/rate-mode/active-filters/deskew status, straight from `/diagnostics`.
-- **Middle — views**: Braille-rendered top (x-y) and side (x-z) views of the
-  merged cloud, with the merged scan overlaid on the top view. Density shades
-  the dots; the extent auto-scales (toggle to a fixed extent with `f`).
-- **Right**: a per-source table (rate, bandwidth, message age, stamp offset,
-  filter drop %) colored by status, plus a live warning feed colored per
-  source (when the message names one) that merges polka's `/rosout` warnings
-  with stale/drift transitions.
+- **Left — capabilities**: engine (CPU/CUDA), output topics, IMU topic/rate/validity
+  (when motion compensation is on), and per-source type/rate-mode/active-filters/deskew
+  status, straight from `/diagnostics`.
+- **Middle — views**: three stacked Braille panels — top (x-y) and side (x-z) views of
+  the merged cloud with the merged scan overlaid on the top view, plus a dedicated
+  scan-only panel so the scan isn't lost in the cloud overlay. Density shades the dots;
+  the extent auto-scales (toggle to a fixed extent with `f`).
+- **Right**: a per-source table (rate, message age, stamp offset) colored by status,
+  plus a live warning feed colored per source (when the message names one) that merges
+  polka's `/rosout` warnings with stale/drift transitions; long lines wrap instead of
+  truncating.
 - **Keys**: `q` quit, `f` fixed/auto extent, `v` toggle views, `p` pause feed.
 
 It is opt-in and changes nothing about the node's normal operation. To run it in

@@ -66,6 +66,14 @@ struct OutputReport {
   bool publish_overdue = false;  // sources fresh but output silent
 };
 
+struct ImuReport {
+  bool enabled = false;   // motion_compensation on with a resolved imu_topic
+  std::string topic;
+  bool valid = false;     // has received at least one usable sample
+  double rate_hz = -1.0;      // -1 = not measurable yet
+  double msg_age_sec = -1.0;  // node now - last stamp; <0 = unknown
+};
+
 struct NodeReport {
   std::string engine;
   size_t sources_total = 0;
@@ -83,6 +91,7 @@ public:
   void publish(
     const NodeReport & node_report,
     const OutputReport & output_report,
+    const ImuReport & imu_report,
     const std::vector<SourceReport> & source_reports,
     const rclcpp::Time & stamp);
 

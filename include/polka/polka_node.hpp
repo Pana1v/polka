@@ -147,6 +147,7 @@ private:
   StatCounters scan_out_counters_;
   StatWindow cloud_out_window_;
   StatWindow scan_out_window_;
+  StatWindow imu_stat_window_;
   int64_t last_points_in_{-1};
   int64_t last_points_out_{-1};
   std::chrono::steady_clock::time_point start_steady_{};

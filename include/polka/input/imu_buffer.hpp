@@ -19,6 +19,7 @@
 #include <sensor_msgs/msg/imu.hpp>
 #include <Eigen/Core>
 
+#include <atomic>
 #include <deque>
 #include <memory>
 #include <mutex>
@@ -45,13 +46,22 @@ public:
 
   std::shared_ptr<const AveragedImu> snapshot() const;
 
+  // Diagnostics accessors - independent of snapshot()/valid, so a diagnostics
+  // tick can report "never received" vs. "receiving but degenerate" separately.
+  const std::string & topic() const {return topic_;}
+  uint64_t msg_count() const {return msg_count_.load(std::memory_order_relaxed);}
+  rclcpp::Time last_stamp() const;
+
 private:
   void callback(sensor_msgs::msg::Imu::ConstSharedPtr msg);
 
+  std::string topic_;
   rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr sub_;
   std::deque<ImuSample> buffer_;
   mutable std::mutex mutex_;
   std::shared_ptr<const AveragedImu> snapshot_;
+  std::atomic<uint64_t> msg_count_{0};
+  rclcpp::Time last_stamp_{0, 0, RCL_ROS_TIME};
   int max_size_;
   rclcpp::Logger logger_;
   rclcpp::Clock::SharedPtr clock_;

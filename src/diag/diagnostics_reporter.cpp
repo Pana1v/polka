@@ -61,12 +61,13 @@ DiagnosticsReporter::DiagnosticsReporter(rclcpp::Node * node)
 void DiagnosticsReporter::publish(
   const NodeReport & node_report,
   const OutputReport & output_report,
+  const ImuReport & imu_report,
   const std::vector<SourceReport> & source_reports,
   const rclcpp::Time & stamp)
 {
   diagnostic_msgs::msg::DiagnosticArray array;
   array.header.stamp = stamp;
-  array.status.reserve(2 + source_reports.size());
+  array.status.reserve(3 + source_reports.size());
 
   {
     DiagnosticStatus st;
@@ -117,6 +118,26 @@ void DiagnosticsReporter::publish(
     st.values.push_back(kv("engine", output_report.engine));
     st.values.push_back(kv("last_publish_age_sec",
       fmt("%.2f", output_report.last_publish_age_sec)));
+    array.status.push_back(std::move(st));
+  }
+
+  if (imu_report.enabled) {
+    DiagnosticStatus st;
+    st.name = prefix_ + "imu";
+    st.hardware_id = "polka";
+    if (!imu_report.valid) {
+      st.level = DiagnosticStatus::WARN;
+      st.message = "no IMU data received on '" + imu_report.topic + "'";
+    } else {
+      st.level = DiagnosticStatus::OK;
+      st.message = "ok";
+    }
+    st.values.push_back(kv("topic", imu_report.topic));
+    st.values.push_back(kv("rate_hz",
+      imu_report.rate_hz >= 0.0 ? fmt("%.2f", imu_report.rate_hz) : "-1"));
+    st.values.push_back(kv("msg_age_sec",
+      imu_report.msg_age_sec >= 0.0 ? fmt("%.3f", imu_report.msg_age_sec) : "-1"));
+    st.values.push_back(kv("valid", bool_str(imu_report.valid)));
     array.status.push_back(std::move(st));
   }
 

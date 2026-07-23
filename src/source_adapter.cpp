@@ -20,9 +20,14 @@
 #include <sensor_msgs/msg/point_field.hpp>
 #include <tf2_eigen/tf2_eigen.hpp>
 
+#include <chrono>
 #include <cstring>
 
 namespace polka {
+
+namespace {
+constexpr uint64_t kPerfLogInterval = 50;
+}
 
 SourceAdapter::SourceAdapter(rclcpp::Node * node, const SourceConfig & config, bool gpu_filters,
                              ImuGetter imu_getter, bool deskew_enabled,
@@ -265,8 +270,23 @@ void SourceAdapter::pc2_callback(sensor_msgs::msg::PointCloud2::ConstSharedPtr m
   // Per-point deskewing (before filters, in sensor frame)
   if (deskew_enabled_ && has_timestamp_field_ && get_imu_) {
     auto imu = get_imu_();
-    if (imu && imu->valid)
+    if (imu && imu->valid) {
+      auto t0 = std::chrono::steady_clock::now();
       deskew_cloud(*cloud, *msg, *imu);
+      double us = std::chrono::duration<double, std::micro>(
+        std::chrono::steady_clock::now() - t0).count();
+      deskew_total_us_ += us;
+      deskew_max_us_ = std::max(deskew_max_us_, us);
+      if (++deskew_calls_ % kPerfLogInterval == 0) {
+        RCLCPP_INFO(logger_,
+          "polka: perf source '%s' deskew: mean=%.3fms max=%.3fms (n=%zu pts, over %llu calls)",
+          config_.name.c_str(), deskew_total_us_ / kPerfLogInterval / 1000.0,
+          deskew_max_us_ / 1000.0, cloud->size(),
+          static_cast<unsigned long long>(kPerfLogInterval));
+        deskew_total_us_ = 0.0;
+        deskew_max_us_ = 0.0;
+      }
+    }
   }
 
   apply_filters(*cloud);

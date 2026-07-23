@@ -56,6 +56,9 @@ private:
   // single actionable warning when they don't (the classic rosbag-without-sim-time or
   // sim-time-without-/clock misconfiguration), then latches via clock_diagnosed_.
   void diagnose_clock_health(const rclcpp::Time & now);
+  // Perf instrumentation: accumulates merge-stage latency, logs a mean/max every
+  // N calls. `engine_label` is just "CPU" or "CUDA" for the log line.
+  void log_merge_perf(double us, const char * engine_label);
 
   MergeConfig config_;
 
@@ -86,6 +89,11 @@ private:
 
   // Set once diagnose_clock_health() has emitted its warning, so it stays quiet after.
   bool clock_diagnosed_{false};
+
+  // Perf instrumentation: rolling merge-stage latency, logged every N calls.
+  uint64_t merge_calls_{0};
+  double merge_total_us_{0.0};
+  double merge_max_us_{0.0};
 
   // Runtime reconfiguration
   ConfigLoader config_loader_;

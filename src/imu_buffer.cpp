@@ -61,10 +61,17 @@ void ImuBuffer::callback(sensor_msgs::msg::Imu::ConstSharedPtr msg)
         "polka: IMU has degenerate orientation quaternion, translation deskew disabled");
     }
   } else {
-    accel.setZero();
-    RCLCPP_WARN_ONCE(logger_,
-      "polka: IMU has no orientation — cannot subtract gravity, "
-      "translation deskew disabled (rotation-only)");
+    // 无 orientation：用静止比力的 EMA 估计体坐标系重力（静止时 accel ≈ +g_body）
+    constexpr double kGravityEmaAlpha = 0.02;
+    if (!g_body_initialized_) {
+      g_body_ema_ = accel;
+      g_body_initialized_ = true;
+    } else {
+      g_body_ema_ = (1.0 - kGravityEmaAlpha) * g_body_ema_ + kGravityEmaAlpha * accel;
+    }
+    accel -= g_body_ema_;
+    RCLCPP_INFO_ONCE(logger_,
+      "polka: IMU has no orientation — estimating body-frame gravity via EMA");
   }
 
   ImuSample sample;

@@ -12,15 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#ifndef POLKA__CONFIG__CONFIG_LOADER_HPP
-#define POLKA__CONFIG__CONFIG_LOADER_HPP
+#ifndef POLKA__CONFIG__CONFIG_LOADER_HPP_
+#define POLKA__CONFIG__CONFIG_LOADER_HPP_
+
+#include <string>
+#include <vector>
 
 #include "polka/types.hpp"
 #include <rclcpp/rclcpp.hpp>
 
-namespace polka {
+namespace polka
+{
 
-class ConfigLoader {
+class ConfigLoader
+{
 public:
   explicit ConfigLoader(rclcpp::Node * node);
   MergeConfig load();
@@ -40,4 +45,4 @@ private:
 
 }  // namespace polka
 
-#endif  // POLKA__CONFIG__CONFIG_LOADER_HPP
+#endif  // POLKA__CONFIG__CONFIG_LOADER_HPP_

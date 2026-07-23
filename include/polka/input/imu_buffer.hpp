@@ -12,11 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#ifndef POLKA__INPUT__IMU_BUFFER_HPP
-#define POLKA__INPUT__IMU_BUFFER_HPP
+#ifndef POLKA__INPUT__IMU_BUFFER_HPP_
+#define POLKA__INPUT__IMU_BUFFER_HPP_
 
-#include <rclcpp/rclcpp.hpp>
-#include <sensor_msgs/msg/imu.hpp>
 #include <Eigen/Core>
 
 #include <deque>
@@ -24,22 +22,29 @@
 #include <mutex>
 #include <string>
 
-namespace polka {
+#include <rclcpp/rclcpp.hpp>
+#include <sensor_msgs/msg/imu.hpp>
 
-struct ImuSample {
+namespace polka
+{
+
+struct ImuSample
+{
   double wx = 0.0, wy = 0.0, wz = 0.0;   // angular velocity (rad/s)
   double ax = 0.0, ay = 0.0, az = 0.0;    // linear acceleration (m/s²)
   rclcpp::Time stamp{0, 0, RCL_ROS_TIME};
 };
 
-struct AveragedImu {
+struct AveragedImu
+{
   Eigen::Vector3d angular_vel = Eigen::Vector3d::Zero();
   Eigen::Vector3d linear_accel = Eigen::Vector3d::Zero();
   bool valid = false;
   std::string frame_id;
 };
 
-class ImuBuffer {
+class ImuBuffer
+{
 public:
   ImuBuffer(rclcpp::Node * node, const std::string & topic, int buffer_size);
 
@@ -59,4 +64,4 @@ private:
 
 }  // namespace polka
 
-#endif  // POLKA__INPUT__IMU_BUFFER_HPP
+#endif  // POLKA__INPUT__IMU_BUFFER_HPP_

@@ -12,15 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#ifndef POLKA__FILTERS__I_FILTER_HPP
-#define POLKA__FILTERS__I_FILTER_HPP
+#ifndef POLKA__FILTERS__I_FILTER_HPP_
+#define POLKA__FILTERS__I_FILTER_HPP_
 
-#include "polka/types.hpp"
 #include <string>
 
-namespace polka {
+#include "polka/types.hpp"
 
-class IFilter {
+namespace polka
+{
+
+class IFilter
+{
 public:
   virtual void apply(CloudT & cloud, const std::string & frame_id) = 0;
   virtual ~IFilter() = default;
@@ -28,4 +31,4 @@ public:
 
 }  // namespace polka
 
-#endif  // POLKA__FILTERS__I_FILTER_HPP
+#endif  // POLKA__FILTERS__I_FILTER_HPP_

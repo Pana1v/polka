@@ -12,16 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#ifndef POLKA__FILTERS__ANGULAR_FILTER_HPP
-#define POLKA__FILTERS__ANGULAR_FILTER_HPP
+#ifndef POLKA__FILTERS__ANGULAR_FILTER_HPP_
+#define POLKA__FILTERS__ANGULAR_FILTER_HPP_
 
-#include "polka/filters/i_filter.hpp"
+#include <string>
 #include <vector>
 #include <utility>
 
-namespace polka {
+#include "polka/filters/i_filter.hpp"
 
-class AngularFilter : public IFilter {
+namespace polka
+{
+
+class AngularFilter : public IFilter
+{
 public:
   AngularFilter(const std::vector<std::pair<double, double>> & ranges_deg, bool invert);
   void apply(CloudT & cloud, const std::string & frame_id) override;
@@ -34,4 +38,4 @@ private:
 
 }  // namespace polka
 
-#endif  // POLKA__FILTERS__ANGULAR_FILTER_HPP
+#endif  // POLKA__FILTERS__ANGULAR_FILTER_HPP_

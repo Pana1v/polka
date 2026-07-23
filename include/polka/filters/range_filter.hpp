@@ -12,14 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#ifndef POLKA__FILTERS__RANGE_FILTER_HPP
-#define POLKA__FILTERS__RANGE_FILTER_HPP
+#ifndef POLKA__FILTERS__RANGE_FILTER_HPP_
+#define POLKA__FILTERS__RANGE_FILTER_HPP_
+
+#include <string>
 
 #include "polka/filters/i_filter.hpp"
 
-namespace polka {
+namespace polka
+{
 
-class RangeFilter : public IFilter {
+class RangeFilter : public IFilter
+{
 public:
   RangeFilter(double min_range, double max_range);
   void apply(CloudT & cloud, const std::string & frame_id) override;
@@ -31,4 +35,4 @@ private:
 
 }  // namespace polka
 
-#endif  // POLKA__FILTERS__RANGE_FILTER_HPP
+#endif  // POLKA__FILTERS__RANGE_FILTER_HPP_

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Capture one polka run: output bag + performance metrics sidecar.
+"""
+Capture one polka run: output bag + performance metrics sidecar.
 
 Launches demo_bringup.launch.py (polka_node + static TFs) with a config, plays
 the converted calibration bag, samples CPU/RAM/GPU + end-to-end latency, and
@@ -178,9 +179,11 @@ def run_once(config_yaml, out_dir, bag_path, duration, warmup=3.0):
     stop_evt = threading.Event()
     cpu_pct, rss_mb, gpu_pct = [], [], []
     proc = psutil.Process(polka_node_pid)
-    th_cpu = threading.Thread(target=sample_psutil, args=(proc, stop_evt, cpu_pct, rss_mb), daemon=True)
+    th_cpu = threading.Thread(
+        target=sample_psutil, args=(proc, stop_evt, cpu_pct, rss_mb), daemon=True)
     th_gpu = threading.Thread(target=sample_gpu, args=(stop_evt, gpu_pct), daemon=True)
-    th_cpu.start(); th_gpu.start()
+    th_cpu.start()
+    th_gpu.start()
 
     end_time = time.monotonic() + duration
     while time.monotonic() < end_time:
@@ -189,7 +192,8 @@ def run_once(config_yaml, out_dir, bag_path, duration, warmup=3.0):
     stop_evt.set()
     kill_tree(play_proc.pid)
     kill_tree(polka_proc.pid)
-    th_cpu.join(timeout=2); th_gpu.join(timeout=2)
+    th_cpu.join(timeout=2)
+    th_gpu.join(timeout=2)
 
     latencies = node.latencies_ms[:]
     node.close()
@@ -207,7 +211,9 @@ def run_once(config_yaml, out_dir, bag_path, duration, warmup=3.0):
     with open(out_dir / "metrics.json", "w") as f:
         json.dump(metrics, f, indent=2)
 
-    print(f"  metrics: n_lat={len(latencies)} n_cpu={len(cpu_pct)} n_gpu={len(gpu_pct)}", flush=True)
+    print(
+        f"  metrics: n_lat={len(latencies)} n_cpu={len(cpu_pct)} n_gpu={len(gpu_pct)}",
+        flush=True)
     if not latencies:
         print("  WARN: no merged_cloud messages received", flush=True)
         return None

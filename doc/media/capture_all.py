@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Capture every feature config sequentially via run_capture.py subprocesses.
+"""
+Capture every feature config sequentially via run_capture.py subprocesses.
 
 Each run is an isolated subprocess (avoids rclpy re-init and process-group
 signal issues from looping captures in one shell). Run from the ws root with

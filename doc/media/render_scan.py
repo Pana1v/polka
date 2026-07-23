@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Render the 2D LaserScan merge panel.
+"""
+Render the 2D LaserScan merge panel.
 
 Left:  each lidar's own flattened scan, overlaid and color-coded.
 Right: the merged scan, where every beam is colored by the sensor that *won*
@@ -36,8 +37,12 @@ COLORS = [c for _, _, c in SOURCES]
 
 
 def read_scan_ranges(run_dir):
-    """Return (list of per-frame range arrays with NaN for invalid bins,
-    angle_min, angle_increment)."""
+    """
+    Return per-frame range arrays plus scan geometry.
+
+    Returns (frames, angle_min, angle_increment), where frames is a list of
+    per-frame range arrays with NaN for invalid bins.
+    """
     d = run_dir / "run"
     if not d.is_dir():
         d = run_dir
@@ -60,8 +65,11 @@ def read_scan_ranges(run_dir):
 
 def style(ax, title):
     ax.set_facecolor(BG)
-    ax.set_xlim(-LIM, LIM); ax.set_ylim(-LIM, LIM); ax.set_aspect("equal")
-    ax.set_xticks([]); ax.set_yticks([])
+    ax.set_xlim(-LIM, LIM)
+    ax.set_ylim(-LIM, LIM)
+    ax.set_aspect("equal")
+    ax.set_xticks([])
+    ax.set_yticks([])
     for s in ax.spines.values():
         s.set_color("#333")
     ax.plot(0, 0, marker="^", color="white", markersize=15, zorder=5)

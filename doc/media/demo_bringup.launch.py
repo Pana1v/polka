@@ -1,4 +1,5 @@
-"""Capture bringup: polka_node + static transforms from the TIERS dataset extrinsics.
+"""
+Capture bringup: polka_node + static transforms from the TIERS dataset extrinsics.
 
 The Calibration.bag carries no TF. OS1 (`os_sensor`) is the base reference; the
 other sensors are placed relative to it using the dataset README extrinsics.

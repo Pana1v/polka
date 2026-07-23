@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Generate per-feature polka configs for the demo GIFs.
+"""
+Generate per-feature polka configs for the demo GIFs.
 
 All configs share a base (3-LiDAR sources, os_sensor output frame); each feature
 variant flips one knob. Run: `python3 gen_configs.py` -> writes media/configs/*.yaml
 """
-import copy
 import pathlib
 
 import yaml
@@ -23,9 +23,15 @@ SRC_DEF = {
 def source_block(names):
     # reliable + deeper queue: the 2.3 MB Ouster cloud is dropped under
     # best_effort/depth-1 when the single-threaded executor is busy.
-    return {n: {"topic": SRC_DEF[n]["topic"], "type": "pointcloud2",
-               "qos_reliability": "reliable", "qos_history_depth": 10}
-            for n in names}
+    return {
+        n: {
+            "topic": SRC_DEF[n]["topic"],
+            "type": "pointcloud2",
+            "qos_reliability": "reliable",
+            "qos_history_depth": 10,
+        }
+        for n in names
+    }
 
 
 def base():
@@ -86,39 +92,49 @@ def main():
     configs["single"] = single
 
     # output filters, each alone
-    c = base(); cloud(c)["filters"]["range"]["enabled"] = True
+    c = base()
+    cloud(c)["filters"]["range"]["enabled"] = True
     configs["filter_range"] = c
-    c = base(); cloud(c)["filters"]["angular"]["enabled"] = True
+    c = base()
+    cloud(c)["filters"]["angular"]["enabled"] = True
     configs["filter_angular"] = c
-    c = base(); cloud(c)["filters"]["box"]["enabled"] = True
+    c = base()
+    cloud(c)["filters"]["box"]["enabled"] = True
     configs["filter_box"] = c
-    c = base(); cloud(c)["height_cap"]["enabled"] = True
+    c = base()
+    cloud(c)["height_cap"]["enabled"] = True
     configs["filter_height"] = c
 
     # angular invert flag
-    c = base(); cloud(c)["filters"]["angular"]["enabled"] = True
+    c = base()
+    cloud(c)["filters"]["angular"]["enabled"] = True
     cloud(c)["filters"]["angular"]["invert"] = False
     configs["invert_keep"] = c
-    c = base(); cloud(c)["filters"]["angular"]["enabled"] = True
+    c = base()
+    cloud(c)["filters"]["angular"]["enabled"] = True
     cloud(c)["filters"]["angular"]["invert"] = True
     configs["invert_exclude"] = c
 
     # self filter
-    c = base(); cloud(c)["self_filter"]["enabled"] = True
+    c = base()
+    cloud(c)["self_filter"]["enabled"] = True
     configs["self_on"] = c
 
     # voxel
-    c = base(); cloud(c)["voxel"]["enabled"] = True
+    c = base()
+    cloud(c)["voxel"]["enabled"] = True
     cloud(c)["voxel"]["leaf_size"] = 0.2
     configs["voxel_on"] = c
 
     # cpu vs cuda
-    c = base(); c["polka"]["ros__parameters"]["enable_gpu"] = False
+    c = base()
+    c["polka"]["ros__parameters"]["enable_gpu"] = False
     configs["cpu"] = c
     # (cuda == merged: enable_gpu True)
 
     # dual output (cloud + scan)
-    c = base(); c["polka"]["ros__parameters"]["outputs"]["scan"]["enabled"] = True
+    c = base()
+    c["polka"]["ros__parameters"]["outputs"]["scan"]["enabled"] = True
     configs["dual"] = c
 
     # per-source 2D scans (single source, scan output) for the scan-merge demo

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Prepare the TIERS Calibration.bag (ROS 1) as a clean ROS 2 mcap for polka.
+"""
+Prepare the TIERS Calibration.bag (ROS 1) as a clean ROS 2 mcap for polka.
 
 One pass over the ROS 1 bag:
   /ouster/points             (PointCloud2)                   -> passthrough
@@ -95,7 +96,9 @@ def ros1_pc2_to_ros2(m):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--in", dest="inp", default=str(pathlib.Path.home() / "Downloads/Calibration.bag"))
+    ap.add_argument(
+        "--in", dest="inp",
+        default=str(pathlib.Path.home() / "Downloads/Calibration.bag"))
     ap.add_argument("--out", default=str(pathlib.Path.home() / "ros2_ws/bags/calibration_ros2"))
     ap.add_argument("--limit", type=int, default=0, help="stop after N messages (debug)")
     ap.add_argument("--accumulate", type=int, default=40,

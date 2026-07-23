@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Render per-feature demo panels with Open3D offscreen + matplotlib compositing.
+"""
+Render per-feature demo panels with Open3D offscreen + matplotlib compositing.
 
 Open3D's GPU offscreen renderer draws the point-cloud pixels (depth, AA); a thin
 matplotlib layer composes the divided panel with titles/labels. One panel = a
@@ -169,8 +170,12 @@ class Renderer:
 def scan_img(xy, lim=12.0):
     """Top-down 2D scan render via matplotlib, returned as an RGB array."""
     fig = plt.figure(figsize=(TILE / 100, TILE / 100), dpi=100, facecolor=BG[:3])
-    ax = fig.add_axes([0, 0, 1, 1]); ax.set_facecolor(BG[:3])
-    ax.set_xlim(-lim, lim); ax.set_ylim(-lim, lim); ax.set_aspect("equal"); ax.axis("off")
+    ax = fig.add_axes([0, 0, 1, 1])
+    ax.set_facecolor(BG[:3])
+    ax.set_xlim(-lim, lim)
+    ax.set_ylim(-lim, lim)
+    ax.set_aspect("equal")
+    ax.axis("off")
     if xy.shape[0] > 0:
         rr = np.hypot(xy[:, 0], xy[:, 1])
         ax.scatter(xy[:, 0], xy[:, 1], c=rr, cmap="turbo", s=6, linewidths=0)
@@ -188,7 +193,8 @@ def compose(imgL, imgR, title, labelL, labelR, footL, footR, out_png):
                  weight="bold", y=0.965)
     for i, (img, lab, foot) in enumerate([(imgL, labelL, footL), (imgR, labelR, footR)]):
         ax = fig.add_subplot(1, 2, i + 1)
-        ax.imshow(img); ax.axis("off")
+        ax.imshow(img)
+        ax.axis("off")
         ax.text(0.03, 0.95, lab, transform=ax.transAxes, color="white",
                 fontsize=20, family="monospace", weight="bold", va="top")
         ax.text(0.03, 0.04, foot, transform=ax.transAxes, color="#bbb",
@@ -258,7 +264,9 @@ def main():
     args = ap.parse_args()
 
     eye, center, up = compute_camera(args.work)
-    print(f"camera eye={[round(v,2) for v in eye]} center={[round(v,2) for v in center]}", flush=True)
+    eye_r = [round(v, 2) for v in eye]
+    center_r = [round(v, 2) for v in center]
+    print(f"camera eye={eye_r} center={center_r}", flush=True)
     renderer = Renderer(eye, center, up)
 
     names = [args.only] if args.only else list(PANELS.keys())

@@ -175,9 +175,9 @@ void PolkaNode::log_merge_perf(double us, const char * engine_label)
   merge_max_us_ = std::max(merge_max_us_, us);
   if (++merge_calls_ % kMergePerfLogInterval == 0) {
     RCLCPP_INFO(get_logger(),
-      "polka: perf merge [%s]: mean=%.3fms max=%.3fms (over %llu calls)",
+      "polka: perf merge [%s]: mean=%.3fms max=%.3fms (over %zu calls)",
       engine_label, merge_total_us_ / kMergePerfLogInterval / 1000.0,
-      merge_max_us_ / 1000.0, static_cast<unsigned long long>(kMergePerfLogInterval));
+      merge_max_us_ / 1000.0, static_cast<size_t>(kMergePerfLogInterval));
     merge_total_us_ = 0.0;
     merge_max_us_ = 0.0;
   }

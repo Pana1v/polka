@@ -20,7 +20,6 @@
 #include <sensor_msgs/msg/point_field.hpp>
 #include <tf2_eigen/tf2_eigen.hpp>
 
-#include <chrono>
 #include <cstring>
 
 namespace polka {
@@ -279,10 +278,10 @@ void SourceAdapter::pc2_callback(sensor_msgs::msg::PointCloud2::ConstSharedPtr m
       deskew_max_us_ = std::max(deskew_max_us_, us);
       if (++deskew_calls_ % kPerfLogInterval == 0) {
         RCLCPP_INFO(logger_,
-          "polka: perf source '%s' deskew: mean=%.3fms max=%.3fms (n=%zu pts, over %llu calls)",
+          "polka: perf source '%s' deskew: mean=%.3fms max=%.3fms (n=%zu pts, over %zu calls)",
           config_.name.c_str(), deskew_total_us_ / kPerfLogInterval / 1000.0,
           deskew_max_us_ / 1000.0, cloud->size(),
-          static_cast<unsigned long long>(kPerfLogInterval));
+          static_cast<size_t>(kPerfLogInterval));
         deskew_total_us_ = 0.0;
         deskew_max_us_ = 0.0;
       }

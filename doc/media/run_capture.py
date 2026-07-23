@@ -22,10 +22,10 @@ import time
 import psutil
 import rclpy
 from rclpy.node import Node
-from rclpy.qos import QoSProfile, ReliabilityPolicy, DurabilityPolicy
+from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from rclpy.serialization import serialize_message
-from sensor_msgs.msg import PointCloud2, LaserScan
 import rosbag2_py
+from sensor_msgs.msg import LaserScan, PointCloud2
 
 try:
     import pynvml
@@ -36,10 +36,10 @@ except Exception:
     _HAS_GPU = False
 
 HERE = pathlib.Path(__file__).parent
-LAUNCH_FILE = HERE / "demo_bringup.launch.py"
-CLOUD_TOPIC = "/polka/merged_cloud"
-SCAN_TOPIC = "/polka/merged_scan"
-DEFAULT_BAG = pathlib.Path.home() / "ros2_ws/bags/calibration_ros2"
+LAUNCH_FILE = HERE / 'demo_bringup.launch.py'
+CLOUD_TOPIC = '/polka/merged_cloud'
+SCAN_TOPIC = '/polka/merged_scan'
+DEFAULT_BAG = pathlib.Path.home() / 'ros2_ws/bags/calibration_ros2'
 
 
 def _reliable(depth=10):
@@ -50,19 +50,20 @@ def _reliable(depth=10):
 
 
 class CaptureNode(Node):
+
     def __init__(self, run_dir):
-        super().__init__("polka_capture_probe")
+        super().__init__('polka_capture_probe')
         self.set_parameters([rclpy.parameter.Parameter(
-            "use_sim_time", rclpy.parameter.Parameter.Type.BOOL, True)])
+            'use_sim_time', rclpy.parameter.Parameter.Type.BOOL, True)])
         self.latencies_ms = []
 
         self.writer = rosbag2_py.SequentialWriter()
-        self.writer.open(rosbag2_py.StorageOptions(uri=str(run_dir), storage_id="mcap"),
-                         rosbag2_py.ConverterOptions("", ""))
+        self.writer.open(rosbag2_py.StorageOptions(uri=str(run_dir), storage_id='mcap'),
+                         rosbag2_py.ConverterOptions('', ''))
         self.writer.create_topic(rosbag2_py.TopicMetadata(
-            name=CLOUD_TOPIC, type="sensor_msgs/msg/PointCloud2", serialization_format="cdr"))
+            name=CLOUD_TOPIC, type='sensor_msgs/msg/PointCloud2', serialization_format='cdr'))
         self.writer.create_topic(rosbag2_py.TopicMetadata(
-            name=SCAN_TOPIC, type="sensor_msgs/msg/LaserScan", serialization_format="cdr"))
+            name=SCAN_TOPIC, type='sensor_msgs/msg/LaserScan', serialization_format='cdr'))
 
         self.create_subscription(PointCloud2, CLOUD_TOPIC, self._cloud_cb, _reliable())
         self.create_subscription(LaserScan, SCAN_TOPIC, self._scan_cb, _reliable())
@@ -119,7 +120,7 @@ def find_polka_pid(parent_pid, timeout=12.0):
         try:
             for child in psutil.Process(parent_pid).children(recursive=True):
                 try:
-                    if "polka_node" in " ".join(child.cmdline()):
+                    if 'polka_node' in ' '.join(child.cmdline()):
                         return child.pid
                 except (psutil.NoSuchProcess, psutil.AccessDenied):
                     continue
@@ -150,30 +151,30 @@ def kill_tree(pid):
 
 def run_once(config_yaml, out_dir, bag_path, duration, warmup=3.0):
     out_dir.mkdir(parents=True, exist_ok=True)
-    run_dir = out_dir / "run"
+    run_dir = out_dir / 'run'
     if run_dir.exists():
         import shutil
         shutil.rmtree(run_dir)
 
     polka_proc = subprocess.Popen(
-        ["ros2", "launch", str(LAUNCH_FILE), f"config_file:={config_yaml}"],
-        stdout=open(out_dir / "polka.log", "w"), stderr=subprocess.STDOUT,
+        ['ros2', 'launch', str(LAUNCH_FILE), f'config_file:={config_yaml}'],
+        stdout=open(out_dir / 'polka.log', 'w'), stderr=subprocess.STDOUT,
         preexec_fn=os.setsid)
     polka_node_pid = find_polka_pid(polka_proc.pid)
     if polka_node_pid is None:
         print(f"  ERROR: polka_node didn't appear under {polka_proc.pid}", flush=True)
         kill_tree(polka_proc.pid)
         return None
-    print(f"  polka_node pid={polka_node_pid}", flush=True)
+    print(f'  polka_node pid={polka_node_pid}', flush=True)
 
     rclpy.init()
     node = CaptureNode(run_dir)
 
     time.sleep(1.0)  # let polka settle / TFs latch before playback
     play_proc = subprocess.Popen(
-        ["ros2", "bag", "play", str(bag_path), "--clock",
-         "--read-ahead-queue-size", "2000"],
-        stdout=open(out_dir / "play.log", "w"), stderr=subprocess.STDOUT,
+        ['ros2', 'bag', 'play', str(bag_path), '--clock',
+         '--read-ahead-queue-size', '2000'],
+        stdout=open(out_dir / 'play.log', 'w'), stderr=subprocess.STDOUT,
         preexec_fn=os.setsid)
 
     stop_evt = threading.Event()
@@ -205,39 +206,39 @@ def run_once(config_yaml, out_dir, bag_path, duration, warmup=3.0):
     rss_mb = rss_mb[int(warmup):]
     gpu_pct = gpu_pct[int(warmup):]
 
-    metrics = {"config": str(config_yaml), "latency_ms": latencies,
-               "cpu_pct": cpu_pct, "rss_mb": rss_mb, "gpu_pct": gpu_pct,
-               "n_msgs": len(latencies), "duration_s": duration, "warmup_s": warmup}
-    with open(out_dir / "metrics.json", "w") as f:
+    metrics = {'config': str(config_yaml), 'latency_ms': latencies,
+               'cpu_pct': cpu_pct, 'rss_mb': rss_mb, 'gpu_pct': gpu_pct,
+               'n_msgs': len(latencies), 'duration_s': duration, 'warmup_s': warmup}
+    with open(out_dir / 'metrics.json', 'w') as f:
         json.dump(metrics, f, indent=2)
 
     print(
-        f"  metrics: n_lat={len(latencies)} n_cpu={len(cpu_pct)} n_gpu={len(gpu_pct)}",
+        f'  metrics: n_lat={len(latencies)} n_cpu={len(cpu_pct)} n_gpu={len(gpu_pct)}',
         flush=True)
     if not latencies:
-        print("  WARN: no merged_cloud messages received", flush=True)
+        print('  WARN: no merged_cloud messages received', flush=True)
         return None
     return metrics
 
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("config_yaml", type=pathlib.Path)
-    ap.add_argument("out_dir", type=pathlib.Path)
-    ap.add_argument("--bag", type=pathlib.Path, default=DEFAULT_BAG)
-    ap.add_argument("--duration", type=float, default=11.0)
-    ap.add_argument("--warmup", type=float, default=2.0)
-    ap.add_argument("--repeats", type=int, default=1)
+    ap.add_argument('config_yaml', type=pathlib.Path)
+    ap.add_argument('out_dir', type=pathlib.Path)
+    ap.add_argument('--bag', type=pathlib.Path, default=DEFAULT_BAG)
+    ap.add_argument('--duration', type=float, default=11.0)
+    ap.add_argument('--warmup', type=float, default=2.0)
+    ap.add_argument('--repeats', type=int, default=1)
     args = ap.parse_args()
 
     if args.repeats == 1:
         run_once(args.config_yaml, args.out_dir, args.bag, args.duration, args.warmup)
     else:
         for i in range(args.repeats):
-            sub = args.out_dir / f"rep_{i:02d}"
-            print(f"== repeat {i+1}/{args.repeats} -> {sub} ==", flush=True)
+            sub = args.out_dir / f'rep_{i:02d}'
+            print(f'== repeat {i+1}/{args.repeats} -> {sub} ==', flush=True)
             run_once(args.config_yaml, sub, args.bag, args.duration, args.warmup)
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()

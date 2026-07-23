@@ -18,27 +18,26 @@ import collections
 import pathlib
 import shutil
 
+from builtin_interfaces.msg import Time
 import numpy as np
-from rosbags.rosbag1 import Reader
-from rosbags.typesys import Stores, get_typestore, get_types_from_msg
-
 from rclpy.serialization import serialize_message
+import rosbag2_py
+from rosbags.rosbag1 import Reader
+from rosbags.typesys import get_types_from_msg, get_typestore, Stores
 from sensor_msgs.msg import PointCloud2, PointField
 from std_msgs.msg import Header
-from builtin_interfaces.msg import Time
-import rosbag2_py
 
-PASSTHROUGH = {"/ouster/points", "/camera/depth/color/points"}
+PASSTHROUGH = {'/ouster/points', '/camera/depth/color/points'}
 LIVOX_MAP = {
-    "/avia/livox/lidar": ("/avia/points", "avia_frame"),
-    "/mid360/livox/lidar": ("/mid360/points", "mid360_frame"),
+    '/avia/livox/lidar': ('/avia/points', 'avia_frame'),
+    '/mid360/livox/lidar': ('/mid360/points', 'mid360_frame'),
 }
 
 
 def _ns(stamp):
-    nsec = getattr(stamp, "nanosec", None)
+    nsec = getattr(stamp, 'nanosec', None)
     if nsec is None:
-        nsec = getattr(stamp, "nsec", 0)
+        nsec = getattr(stamp, 'nsec', 0)
     return int(stamp.sec), int(nsec)
 
 
@@ -64,10 +63,10 @@ def pc2_from_xyzi(arr, frame_id, stamp):
     pc.height = 1
     pc.width = n
     pc.fields = [
-        PointField(name="x", offset=0, datatype=PointField.FLOAT32, count=1),
-        PointField(name="y", offset=4, datatype=PointField.FLOAT32, count=1),
-        PointField(name="z", offset=8, datatype=PointField.FLOAT32, count=1),
-        PointField(name="intensity", offset=12, datatype=PointField.FLOAT32, count=1),
+        PointField(name='x', offset=0, datatype=PointField.FLOAT32, count=1),
+        PointField(name='y', offset=4, datatype=PointField.FLOAT32, count=1),
+        PointField(name='z', offset=8, datatype=PointField.FLOAT32, count=1),
+        PointField(name='intensity', offset=12, datatype=PointField.FLOAT32, count=1),
     ]
     pc.is_bigendian = False
     pc.point_step = 16
@@ -89,7 +88,7 @@ def ros1_pc2_to_ros2(m):
     pc.point_step = int(m.point_step)
     pc.row_step = int(m.row_step)
     data = m.data
-    pc.data = data.tobytes() if hasattr(data, "tobytes") else bytes(data)
+    pc.data = data.tobytes() if hasattr(data, 'tobytes') else bytes(data)
     pc.is_dense = bool(m.is_dense)
     return pc
 
@@ -97,15 +96,15 @@ def ros1_pc2_to_ros2(m):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument(
-        "--in", dest="inp",
-        default=str(pathlib.Path.home() / "Downloads/Calibration.bag"))
-    ap.add_argument("--out", default=str(pathlib.Path.home() / "ros2_ws/bags/calibration_ros2"))
-    ap.add_argument("--limit", type=int, default=0, help="stop after N messages (debug)")
-    ap.add_argument("--accumulate", type=int, default=40,
-                    help="Livox sliding-window size (frames) to densify the "
-                         "non-repetitive solid-state scans and remove flicker")
-    ap.add_argument("--accum-stride", type=int, default=4,
-                    help="emit an accumulated Livox cloud every Nth input message")
+        '--in', dest='inp',
+        default=str(pathlib.Path.home() / 'Downloads/Calibration.bag'))
+    ap.add_argument('--out', default=str(pathlib.Path.home() / 'ros2_ws/bags/calibration_ros2'))
+    ap.add_argument('--limit', type=int, default=0, help='stop after N messages (debug)')
+    ap.add_argument('--accumulate', type=int, default=40,
+                    help='Livox sliding-window size (frames) to densify the '
+                         'non-repetitive solid-state scans and remove flicker')
+    ap.add_argument('--accum-stride', type=int, default=4,
+                    help='emit an accumulated Livox cloud every Nth input message')
     args = ap.parse_args()
 
     out = pathlib.Path(args.out)
@@ -116,16 +115,16 @@ def main():
     ts = get_typestore(Stores.ROS1_NOETIC)
 
     writer = rosbag2_py.SequentialWriter()
-    writer.open(rosbag2_py.StorageOptions(uri=str(out), storage_id="mcap"),
-                rosbag2_py.ConverterOptions("", ""))
+    writer.open(rosbag2_py.StorageOptions(uri=str(out), storage_id='mcap'),
+                rosbag2_py.ConverterOptions('', ''))
 
-    out_topics = ["/ouster/points", "/camera/depth/color/points",
-                  "/avia/points", "/mid360/points"]
+    out_topics = ['/ouster/points', '/camera/depth/color/points',
+                  '/avia/points', '/mid360/points']
     for t in out_topics:
         writer.create_topic(rosbag2_py.TopicMetadata(
-            name=t, type="sensor_msgs/msg/PointCloud2", serialization_format="cdr"))
+            name=t, type='sensor_msgs/msg/PointCloud2', serialization_format='cdr'))
 
-    counts = {t: 0 for t in out_topics}
+    counts = dict.fromkeys(out_topics, 0)
     # Sliding window of recent Livox frames per source: each non-repetitive
     # 100 Hz swath is a coherent spatial chunk that relocates every frame, so a
     # single swath flickers against the stable Ouster cloud. Accumulating the
@@ -137,7 +136,7 @@ def main():
 
     with Reader(pathlib.Path(args.inp)) as r:
         for c in r.connections:
-            if "CustomMsg" in c.msgtype:
+            if 'CustomMsg' in c.msgtype:
                 text = c.msgdef[1] if isinstance(c.msgdef, tuple) else c.msgdef
                 ts.register(get_types_from_msg(text, c.msgtype))
 
@@ -167,10 +166,10 @@ def main():
                 break
 
     del writer
-    print("wrote:", str(out))
+    print('wrote:', str(out))
     for t, n in counts.items():
-        print(f"  {t:28} {n}")
+        print(f'  {t:28} {n}')
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()

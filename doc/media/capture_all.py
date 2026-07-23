@@ -11,29 +11,29 @@ import subprocess
 import sys
 
 HERE = pathlib.Path(__file__).parent
-CONFIGS = HERE / "configs"
-WORK = HERE / "work"
+CONFIGS = HERE / 'configs'
+WORK = HERE / 'work'
 
 # cpu_vs_cuda omitted: needs a working CUDA runtime (currently error 999).
-DEFAULT = ["single", "merged", "filter_range", "filter_angular", "filter_box",
-           "filter_height", "invert_keep", "invert_exclude", "self_on",
-           "voxel_on", "dual"]
+DEFAULT = ['single', 'merged', 'filter_range', 'filter_angular', 'filter_box',
+           'filter_height', 'invert_keep', 'invert_exclude', 'self_on',
+           'voxel_on', 'dual']
 
 
 def main():
     names = sys.argv[1:] or DEFAULT
     for cfg in names:
-        out = WORK / f"cap_{cfg}"
-        print(f"=== capture {cfg} ===", flush=True)
+        out = WORK / f'cap_{cfg}'
+        print(f'=== capture {cfg} ===', flush=True)
         try:
             subprocess.run(
-                [sys.executable, str(HERE / "run_capture.py"),
-                 str(CONFIGS / f"{cfg}.yaml"), str(out), "--duration", "12"],
+                [sys.executable, str(HERE / 'run_capture.py'),
+                 str(CONFIGS / f'{cfg}.yaml'), str(out), '--duration', '12'],
                 timeout=60, check=False)
         except subprocess.TimeoutExpired:
-            print(f"  {cfg}: TIMEOUT", flush=True)
-    print("CAPTURE_ALL DONE", flush=True)
+            print(f'  {cfg}: TIMEOUT', flush=True)
+    print('CAPTURE_ALL DONE', flush=True)
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()

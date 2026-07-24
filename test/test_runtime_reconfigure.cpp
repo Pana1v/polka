@@ -150,8 +150,7 @@ TEST_F(RuntimeReconfigureTest, TopicChangeRecreatesSubscription)
   ASSERT_TRUE(
     spin_until(
       [&]() {
-        return helper_->count_subscribers("/t1") == 0u &&
-        helper_->count_subscribers("/t1b") == 1u;
+        return helper_->count_subscribers("/t1") == 0u && helper_->count_subscribers("/t1b") == 1u;
       }, 2000ms));
 }
 

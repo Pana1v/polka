@@ -181,6 +181,26 @@ void PolkaNode::diagnose_clock_health(const rclcpp::Time & now)
   // leave clock_diagnosed_ unset and re-evaluate on the next tick — no false alarm.
 }
 
+namespace
+{
+constexpr uint64_t kMergePerfLogInterval = 50;
+}
+
+void PolkaNode::log_merge_perf(double us, const char * engine_label)
+{
+  merge_total_us_ += us;
+  merge_max_us_ = std::max(merge_max_us_, us);
+  if (++merge_calls_ % kMergePerfLogInterval == 0) {
+    RCLCPP_INFO(
+      get_logger(),
+      "polka: perf merge [%s]: mean=%.3fms max=%.3fms (over %zu calls)",
+      engine_label, merge_total_us_ / kMergePerfLogInterval / 1000.0,
+      merge_max_us_ / 1000.0, static_cast<size_t>(kMergePerfLogInterval));
+    merge_total_us_ = 0.0;
+    merge_max_us_ = 0.0;
+  }
+}
+
 void PolkaNode::output_callback()
 {
   auto now = this->now();
@@ -303,7 +323,11 @@ void PolkaNode::output_callback()
   if (merge_engine_->is_gpu()) {
     auto pcfg = output_pipeline_.to_pipeline_config(
       scan_pub_ != nullptr, config_.scan_output.flatten);
+    auto merge_t0 = std::chrono::steady_clock::now();
     auto result = merge_engine_->merge_pipeline(inputs, pcfg);
+    log_merge_perf(
+      std::chrono::duration<double, std::micro>(
+        std::chrono::steady_clock::now() - merge_t0).count(), "CUDA");
     if (!result.cloud || result.cloud->empty()) {return;}
 
     if (cloud_pub_) {
@@ -329,7 +353,11 @@ void PolkaNode::output_callback()
       last_scan_ranges_ = result.scan_ranges;
     }
   } else {
+    auto merge_t0 = std::chrono::steady_clock::now();
     auto merged = merge_engine_->merge(inputs);
+    log_merge_perf(
+      std::chrono::duration<double, std::micro>(
+        std::chrono::steady_clock::now() - merge_t0).count(), "CPU");
     if (!merged || merged->empty()) {return;}
 
     if (config_.point_timestamps.enabled && config_.cloud_output.voxel.enabled) {

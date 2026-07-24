@@ -109,6 +109,11 @@ private:
   // Per-source IMU (when configured) and TF for frame rotation
   std::shared_ptr<ImuBuffer> local_imu_;
   std::shared_ptr<tf2_ros::Buffer> tf_buffer_;
+
+  // Perf instrumentation: rolling deskew-loop latency, logged every N calls.
+  uint64_t deskew_calls_{0};
+  double deskew_total_us_{0.0};
+  double deskew_max_us_{0.0};
 };
 
 }  // namespace polka

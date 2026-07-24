@@ -26,6 +26,14 @@
 namespace polka
 {
 
+namespace
+{
+constexpr uint64_t kPerfLogInterval = 50;
+// Rotation-only deskew fast path: exact-compute the per-point rotation every this
+// many points, linearly interpolate the rest. See deskew_cloud() for the error bound.
+constexpr size_t kDeskewInterpStride = 16;
+}
+
 SourceAdapter::SourceAdapter(
   rclcpp::Node * node, const SourceConfig & config, bool gpu_filters,
   ImuGetter imu_getter, bool deskew_enabled,
@@ -225,6 +233,48 @@ void SourceAdapter::deskew_cloud(
   const uint8_t * raw_data = raw_msg.data.data();
   const uint32_t point_step = raw_msg.point_step;
 
+  // Fast path: rotation-only (accel is exactly zeroed upstream whenever there is no
+  // IMU orientation to subtract gravity with, i.e. no translation twist for this whole
+  // scan) and a non-negligible angular rate. angular_vel is one fixed snapshot for the
+  // whole scan, so every point's rotation shares the same axis and its signed angle is
+  // exactly linear in dt. Exact-compute the rotation only at a coarse stride and
+  // linearly extrapolate the rest from the nearest anchor (first-order Rodrigues
+  // expansion around the anchor angle) instead of paying two trig calls per point.
+  const double omega_mag = angular_vel.norm();
+  if (accel.squaredNorm() == 0.0 && omega_mag > 1e-10) {
+    const Eigen::Vector3d axis = angular_vel / omega_mag;
+    Eigen::Matrix3d R_anchor = Eigen::Matrix3d::Identity();
+    double theta_anchor = 0.0;
+    bool have_anchor = false;
+
+    for (size_t i = 0; i < n; ++i) {
+      double pt_time = extract_point_time(raw_data + i * point_step);
+      double dt = (pt_time > 1e8) ? (pt_time - header_sec) : pt_time;
+      if (std::abs(dt) < 1e-9) {continue;}
+
+      const double theta = -omega_mag * dt;
+      const Eigen::Vector3d p(cloud[i].x, cloud[i].y, cloud[i].z);
+      Eigen::Vector3d corrected;
+
+      if (!have_anchor || (i % kDeskewInterpStride) == 0) {
+        R_anchor = Eigen::AngleAxisd(theta, axis).toRotationMatrix();
+        theta_anchor = theta;
+        have_anchor = true;
+        corrected = R_anchor * p;
+      } else {
+        const double delta_theta = theta - theta_anchor;
+        corrected = R_anchor * (p + delta_theta * axis.cross(p));
+      }
+
+      cloud[i].x = static_cast<float>(corrected.x());
+      cloud[i].y = static_cast<float>(corrected.y());
+      cloud[i].z = static_cast<float>(corrected.z());
+    }
+    return;
+  }
+
+  // Fallback: exact per-point SE(3) computation. Used when translation is active
+  // (an IMU with usable orientation) or rotation is negligible for this scan.
   for (size_t i = 0; i < n; ++i) {
     double pt_time = extract_point_time(raw_data + i * point_step);
 
@@ -285,7 +335,24 @@ void SourceAdapter::pc2_callback(sensor_msgs::msg::PointCloud2::ConstSharedPtr m
   // Per-point deskewing (before filters, in sensor frame)
   if (deskew_enabled_ && has_timestamp_field_ && get_imu_) {
     auto imu = get_imu_();
-    if (imu && imu->valid) {deskew_cloud(*cloud, *msg, *imu);}
+    if (imu && imu->valid) {
+      auto t0 = std::chrono::steady_clock::now();
+      deskew_cloud(*cloud, *msg, *imu);
+      double us = std::chrono::duration<double, std::micro>(
+        std::chrono::steady_clock::now() - t0).count();
+      deskew_total_us_ += us;
+      deskew_max_us_ = std::max(deskew_max_us_, us);
+      if (++deskew_calls_ % kPerfLogInterval == 0) {
+        RCLCPP_INFO(
+          logger_,
+          "polka: perf source '%s' deskew: mean=%.3fms max=%.3fms (n=%zu pts, over %zu calls)",
+          config_.name.c_str(), deskew_total_us_ / kPerfLogInterval / 1000.0,
+          deskew_max_us_ / 1000.0, cloud->size(),
+          static_cast<size_t>(kPerfLogInterval));
+        deskew_total_us_ = 0.0;
+        deskew_max_us_ = 0.0;
+      }
+    }
   }
 
   apply_filters(*cloud);

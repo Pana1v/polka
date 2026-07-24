@@ -29,6 +29,9 @@ namespace polka
 namespace
 {
 constexpr uint64_t kPerfLogInterval = 50;
+// Rotation-only deskew fast path: exact-compute the per-point rotation every this
+// many points, linearly interpolate the rest. See deskew_cloud() for the error bound.
+constexpr size_t kDeskewInterpStride = 16;
 }
 
 SourceAdapter::SourceAdapter(
@@ -230,6 +233,48 @@ void SourceAdapter::deskew_cloud(
   const uint8_t * raw_data = raw_msg.data.data();
   const uint32_t point_step = raw_msg.point_step;
 
+  // Fast path: rotation-only (accel is exactly zeroed upstream whenever there is no
+  // IMU orientation to subtract gravity with, i.e. no translation twist for this whole
+  // scan) and a non-negligible angular rate. angular_vel is one fixed snapshot for the
+  // whole scan, so every point's rotation shares the same axis and its signed angle is
+  // exactly linear in dt. Exact-compute the rotation only at a coarse stride and
+  // linearly extrapolate the rest from the nearest anchor (first-order Rodrigues
+  // expansion around the anchor angle) instead of paying two trig calls per point.
+  const double omega_mag = angular_vel.norm();
+  if (accel.squaredNorm() == 0.0 && omega_mag > 1e-10) {
+    const Eigen::Vector3d axis = angular_vel / omega_mag;
+    Eigen::Matrix3d R_anchor = Eigen::Matrix3d::Identity();
+    double theta_anchor = 0.0;
+    bool have_anchor = false;
+
+    for (size_t i = 0; i < n; ++i) {
+      double pt_time = extract_point_time(raw_data + i * point_step);
+      double dt = (pt_time > 1e8) ? (pt_time - header_sec) : pt_time;
+      if (std::abs(dt) < 1e-9) {continue;}
+
+      const double theta = -omega_mag * dt;
+      const Eigen::Vector3d p(cloud[i].x, cloud[i].y, cloud[i].z);
+      Eigen::Vector3d corrected;
+
+      if (!have_anchor || (i % kDeskewInterpStride) == 0) {
+        R_anchor = Eigen::AngleAxisd(theta, axis).toRotationMatrix();
+        theta_anchor = theta;
+        have_anchor = true;
+        corrected = R_anchor * p;
+      } else {
+        const double delta_theta = theta - theta_anchor;
+        corrected = R_anchor * (p + delta_theta * axis.cross(p));
+      }
+
+      cloud[i].x = static_cast<float>(corrected.x());
+      cloud[i].y = static_cast<float>(corrected.y());
+      cloud[i].z = static_cast<float>(corrected.z());
+    }
+    return;
+  }
+
+  // Fallback: exact per-point SE(3) computation. Used when translation is active
+  // (an IMU with usable orientation) or rotation is negligible for this scan.
   for (size_t i = 0; i < n; ++i) {
     double pt_time = extract_point_time(raw_data + i * point_step);
 

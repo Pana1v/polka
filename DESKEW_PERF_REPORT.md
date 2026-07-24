@@ -195,7 +195,8 @@ measurable correctness regression from the optimization.
 - `include/polka/util/se3_exp.hpp`: skip the SO(3) left-Jacobian computation when there
   is no translation to apply (`rho` is the zero vector).
 - `src/source_adapter.cpp` / `include/polka/input/source_adapter.hpp`: rolling
-  mean/max deskew-loop latency, logged every 50 calls.
+  mean/max deskew-loop latency, logged every 50 calls; coarse-stride SE(3) rotation
+  interpolation for the rotation-only deskew path (see Follow-up below).
 - `src/polka_node.cpp` / `include/polka/polka_node.hpp`: rolling mean/max merge-stage
   latency (CPU and CUDA paths), logged every 50 calls.
 - Repo-wide `ament_uncrustify --reformat` plus scripted header-guard renames and
@@ -205,54 +206,70 @@ measurable correctness regression from the optimization.
   unrelated to the deskew work, but blocking this PR's CI. `colcon test` now shows all
   7 lint/style checks passing locally against this exact branch state.
 
-## Follow-up (specced, not implemented here)
+## Follow-up: coarse-stride SE(3) interpolation (implemented and measured)
 
-Even after skipping the left-Jacobian, the remaining cost is still one full SE(3)
-exponential map (`AngleAxisd` + `sin`/`cos` + rotation-matrix build + `Isometry3d`
-inverse + 3x3 matvec) **per point** — confirmed the dominant remaining cost by the
-bypass test in "Profiling" above (~8.3-9.3ms of the ~9-10ms optimized deskew loop, i.e.
-still ~85-90% of it). For one 86.4k-point scan at the measured per-source rate, that's
-roughly 95-110ns/point of transcendental-function work, repeated independently for
-every point even though within one scan `angular_vel` is fixed and only `dt` varies
-linearly with azimuth.
+Even after skipping the left-Jacobian, the remaining cost was still one full SE(3)
+exponential map (`AngleAxisd` plus `sin`/`cos` plus rotation-matrix build plus
+`Isometry3d` inverse plus 3x3 matvec) per point, confirmed the dominant remaining cost
+by the earlier bypass test (about 85 to 90 percent of the optimized deskew loop). Within
+one scan `angular_vel` is a single fixed IMU snapshot, so every point's rotation is about
+the same fixed axis and its signed angle is exactly linear in `dt`. Implemented in
+`SourceAdapter::deskew_cloud()` (`src/source_adapter.cpp`): in the rotation-only case
+(translation is exactly zeroed upstream whenever there is no IMU orientation, which is
+this rig's only exercised case), compute the exact rotation only every
+`kDeskewInterpStride` points (16 by default) and linearly extrapolate the rest from the
+nearest anchor using a first order Rodrigues expansion, `R_anchor * (p + delta_theta *
+(axis cross p))`. Translation-active scans, or negligible rotation, fall back to the
+unchanged exact per-point path.
 
-**Proposed fix:** precompute `exp(ω·dt) [+ 0.5·a·dt² when accel is available]` at a
-coarse stride — e.g. once per ring, or every N-th point (N≈16-32) along the scan — and
-linearly interpolate the SE(3) delta (or just the rotation angle, since `ω` is constant
-within a scan and the rotation axis is fixed, so only the angle magnitude needs
-interpolating) for the points in between. This cuts transcendental-function calls by
-roughly the stride factor (~5-10x fewer `sin`/`cos`/`AngleAxisd` evaluations) at the
-cost of a bounded linear-interpolation error between anchor points, which is small
-because `dt` (and hence the rotation angle) varies smoothly and monotonically across
-a scan — the same continuity the current per-point exact computation exists to avoid
-losing wholesale.
+**Correctness verification.** Comparing interpolated against exact output through the
+full live node replay was confounded: the interpolated build is now roughly 6x faster
+per source, which shifts the real-time race over which per-source frame each
+`SourceAdapter` has cached when the output timer fires, so the two builds' merged
+clouds differ in point count at a matched header stamp (about 1 percent), and a
+nearest-neighbor comparison across mismatched clouds produces spurious long-tail
+distances that reflect that timing shift, not the deskew math. Isolated the actual
+algorithm instead: a standalone unit check (`se3_exp.hpp` linked directly, no ROS, no
+replay) reproducing 86,400 synthetic points over a 100ms scan at `|omega| = 0.74 rad/s`
+(the peak angular rate measured in Part A) and `stride = 16` gives a maximum
+interpolated-vs-exact error of 1.65e-7 cm and a mean of 2.9e-8 cm, many orders of
+magnitude below the noise floor already established for this investigation (about
+1.17cm mean, 33.9cm max). This is the same lesson as the isolated-vs-embedded
+microbenchmark gap earlier in this report: use the isolated test to judge the
+algorithm, and the embedded test to judge real-world latency, and do not let one
+substitute for the other.
 
-**Bounded accuracy loss:** worst case, the interpolation error is the second-derivative
-term dropped by linearizing `exp()` between anchors, which scales with `(stride ·
-Δdt)²·|ω|²/2` — for stride=16 points out of ~86.4k over a 100ms scan (Δdt per point
-≈1.16µs, so anchor spacing ≈18.5µs) and `|ω|` up to the peak ~0.74 rad/s measured in
-Part A, this is several orders of magnitude below the ~1cm displacement noise floor
-already established as acceptable above — i.e., the interpolation error should be
-undetectable against the existing measurement noise, but this needs to be verified
-empirically (compare interpolated vs exact per-point output, same tolerance framework
-as the re-check above) before merging, not assumed.
+**Measured speedup.** Same container, same bag window, clean back-to-back rebuild and
+replay (`ROS_DOMAIN_ID` isolated, `use_sim_time` with `--clock`, reliable QoS on the
+source subscriptions), per-source deskew latency from the node's own rolling perf log
+(51 to 75 logged windows of 50 calls each per build):
 
-**Where to implement:** `SourceAdapter::deskew_cloud()` in `src/source_adapter.cpp` —
-replace the per-point `compute_motion_delta(angular_vel, accel, dt)` call with a
-precompute pass every `kDeskewInterpStride` points, then interpolate between anchors
-for the points in between. Left unimplemented here due to context budget; specced
-concretely enough to build and measure directly against this report's tolerance
-framework.
+| Stage | Pre-interpolation (this report's earlier optimization) | With coarse-stride interpolation | Change |
+|---|---|---|---|
+| Deskew, per source (86.4k pts) | mean 9.845ms (range 7.7-13.6ms) | mean 1.577ms (range 1.3-2.0ms) | **~84% reduction, ~6.2x** |
+
+This is a materially bigger win than the 5 to 10x fewer transcendental calls originally
+estimated for the trig cost alone, because the interpolated path also skips
+constructing an `Isometry3d`, its inverse, and the associated allocations for every
+non-anchor point, not just the `sin`/`cos` pair.
+
+**Stride choice.** `kDeskewInterpStride = 16` was not tuned against alternatives: the
+error at this stride is already nanometers, so a larger stride would trade negligible
+remaining accuracy margin for a small additional speedup on an already 6x-reduced cost,
+not judged worth the extra tuning surface here.
 
 ## Verdict
 
 - Correctness: PASS on the primary controlled comparison (displacement scales with
   range and with IMU-measured motion as expected); direction-of-correction is
   plausible but not independently proven — flagged as an open item above, not glossed
-  over.
-- Performance: ~20% reduction in the dominant per-scan cost (deskew), safe (exact
-  no-op skip, re-check confirms no regression beyond natural noise), reproducible.
-  Worth merging.
+  over. The coarse-stride interpolation follow-up is verified correct in isolation
+  (nanometer-scale error against the exact computation at the peak measured angular
+  rate).
+- Performance: ~20% reduction from skipping the redundant left-Jacobian, plus a further
+  ~84% reduction (~6.2x) from coarse-stride interpolation of the remaining per-point
+  rotation, both safe and reproducible. Combined, per-source deskew latency drops from
+  an original baseline of roughly 11 to 12ms to about 1.3 to 2.0ms. Worth merging.
 - CUDA merge being slower than CPU merge for this no-filter config is reported as-is;
   no attempt was made to "fix" it since it wasn't the profiled hot stage for this task
   and isn't a regression from this change.

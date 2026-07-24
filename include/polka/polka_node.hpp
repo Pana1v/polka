@@ -15,20 +15,6 @@
 #ifndef POLKA__POLKA_NODE_HPP_
 #define POLKA__POLKA_NODE_HPP_
 
-#include "polka/types.hpp"
-#include "polka/config/config_loader.hpp"
-#include "polka/diag/diagnostics_reporter.hpp"
-#include "polka/diag/drift_tracker.hpp"
-#include "polka/diag/stat_counters.hpp"
-#include "polka/input/source_adapter.hpp"
-#include "polka/input/imu_buffer.hpp"
-#include "polka/merge_engine/i_merge_engine.hpp"
-#include "polka/output/output_pipeline.hpp"
-#include "polka/output/scan_builder.hpp"
-
-#include <rclcpp/rclcpp.hpp>
-#include <sensor_msgs/msg/point_cloud2.hpp>
-#include <sensor_msgs/msg/laser_scan.hpp>
 #include <tf2_ros/buffer.h>
 #include <tf2_ros/transform_listener.h>
 #include <Eigen/Geometry>
@@ -39,9 +25,25 @@
 #include <string>
 #include <vector>
 
-namespace polka {
+#include "polka/types.hpp"
+#include "polka/config/config_loader.hpp"
+#include "polka/diag/diagnostics_reporter.hpp"
+#include "polka/diag/drift_tracker.hpp"
+#include "polka/diag/stat_counters.hpp"
+#include "polka/input/source_adapter.hpp"
+#include "polka/input/imu_buffer.hpp"
+#include "polka/merge_engine/i_merge_engine.hpp"
+#include "polka/output/output_pipeline.hpp"
+#include "polka/output/scan_builder.hpp"
+#include <rclcpp/rclcpp.hpp>
+#include <sensor_msgs/msg/point_cloud2.hpp>
+#include <sensor_msgs/msg/laser_scan.hpp>
 
-class PolkaNode : public rclcpp::Node {
+namespace polka
+{
+
+class PolkaNode : public rclcpp::Node
+{
 public:
   explicit PolkaNode(const rclcpp::NodeOptions & options);
 
@@ -50,7 +52,8 @@ private:
   // parallel indices. Order always follows source_names / config_.sources.
   // adapter == nullptr marks a "pending" source: declared in source_names but
   // its topic parameter is still empty; it activates on a later reconfigure.
-  struct SourceSlot {
+  struct SourceSlot
+  {
     std::unique_ptr<SourceAdapter> adapter;
     Eigen::Isometry3d last_good_transform = Eigen::Isometry3d::Identity();
     DriftTracker drift;
@@ -71,6 +74,9 @@ private:
   // single actionable warning when they don't (the classic rosbag-without-sim-time or
   // sim-time-without-/clock misconfiguration), then latches via clock_diagnosed_.
   void diagnose_clock_health(const rclcpp::Time & now);
+  // Perf instrumentation: accumulates merge-stage latency, logs a mean/max every
+  // N calls. `engine_label` is just "CPU" or "CUDA" for the log line.
+  void log_merge_perf(double us, const char * engine_label);
 
   // --- Two-phase runtime reconfiguration ---
   // Humble's on-set callback fires BEFORE the proposed values are committed to
@@ -124,6 +130,11 @@ private:
 
   // Set once diagnose_clock_health() has emitted its warning, so it stays quiet after.
   bool clock_diagnosed_{false};
+
+  // Perf instrumentation: rolling merge-stage latency, logged every N calls.
+  uint64_t merge_calls_{0};
+  double merge_total_us_{0.0};
+  double merge_max_us_{0.0};
 
   // Runtime reconfiguration.
   //

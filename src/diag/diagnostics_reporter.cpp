@@ -16,9 +16,11 @@
 
 #include <cstdio>
 
-namespace polka {
+namespace polka
+{
 
-namespace {
+namespace
+{
 
 using diagnostic_msgs::msg::DiagnosticStatus;
 using diagnostic_msgs::msg::KeyValue;
@@ -76,7 +78,8 @@ void DiagnosticsReporter::publish(
     const bool degraded = node_report.sources_fresh < node_report.sources_total;
     st.level = degraded ? DiagnosticStatus::WARN : DiagnosticStatus::OK;
     char msg[96];
-    std::snprintf(msg, sizeof(msg), "%s pipeline, %zu/%zu sources fresh",
+    std::snprintf(
+      msg, sizeof(msg), "%s pipeline, %zu/%zu sources fresh",
       node_report.engine.c_str(), node_report.sources_fresh, node_report.sources_total);
     st.message = msg;
     st.values.push_back(kv("engine", node_report.engine));
@@ -97,27 +100,37 @@ void DiagnosticsReporter::publish(
     if (output_report.publish_overdue) {
       st.message = "sources fresh but nothing published";
     } else if (output_report.cloud_rates.valid || output_report.scan_rates.valid) {
-      const auto & r = output_report.cloud_rates.valid
-        ? output_report.cloud_rates : output_report.scan_rates;
+      const auto & r = output_report.cloud_rates.valid ?
+        output_report.cloud_rates : output_report.scan_rates;
       st.message = "publishing " + fmt("%.1f", r.msg_hz) + " Hz";
     } else {
       st.message = "no output yet";
     }
     st.values.push_back(kv("cloud_topic", output_report.cloud_topic));
     st.values.push_back(kv("scan_topic", output_report.scan_topic));
-    st.values.push_back(kv("cloud_rate_hz",
-      rate_str(output_report.cloud_rates, &StatWindow::Rates::msg_hz)));
-    st.values.push_back(kv("cloud_bandwidth_Bps",
-      rate_str(output_report.cloud_rates, &StatWindow::Rates::bytes_per_sec)));
-    st.values.push_back(kv("scan_rate_hz",
-      rate_str(output_report.scan_rates, &StatWindow::Rates::msg_hz)));
-    st.values.push_back(kv("scan_bandwidth_Bps",
-      rate_str(output_report.scan_rates, &StatWindow::Rates::bytes_per_sec)));
+    st.values.push_back(
+      kv(
+        "cloud_rate_hz",
+        rate_str(output_report.cloud_rates, &StatWindow::Rates::msg_hz)));
+    st.values.push_back(
+      kv(
+        "cloud_bandwidth_Bps",
+        rate_str(output_report.cloud_rates, &StatWindow::Rates::bytes_per_sec)));
+    st.values.push_back(
+      kv(
+        "scan_rate_hz",
+        rate_str(output_report.scan_rates, &StatWindow::Rates::msg_hz)));
+    st.values.push_back(
+      kv(
+        "scan_bandwidth_Bps",
+        rate_str(output_report.scan_rates, &StatWindow::Rates::bytes_per_sec)));
     st.values.push_back(kv("points_in", std::to_string(output_report.points_in)));
     st.values.push_back(kv("points_out", std::to_string(output_report.points_out)));
     st.values.push_back(kv("engine", output_report.engine));
-    st.values.push_back(kv("last_publish_age_sec",
-      fmt("%.2f", output_report.last_publish_age_sec)));
+    st.values.push_back(
+      kv(
+        "last_publish_age_sec",
+        fmt("%.2f", output_report.last_publish_age_sec)));
     array.status.push_back(std::move(st));
   }
 
@@ -133,10 +146,14 @@ void DiagnosticsReporter::publish(
       st.message = "ok";
     }
     st.values.push_back(kv("topic", imu_report.topic));
-    st.values.push_back(kv("rate_hz",
-      imu_report.rate_hz >= 0.0 ? fmt("%.2f", imu_report.rate_hz) : "-1"));
-    st.values.push_back(kv("msg_age_sec",
-      imu_report.msg_age_sec >= 0.0 ? fmt("%.3f", imu_report.msg_age_sec) : "-1"));
+    st.values.push_back(
+      kv(
+        "rate_hz",
+        imu_report.rate_hz >= 0.0 ? fmt("%.2f", imu_report.rate_hz) : "-1"));
+    st.values.push_back(
+      kv(
+        "msg_age_sec",
+        imu_report.msg_age_sec >= 0.0 ? fmt("%.3f", imu_report.msg_age_sec) : "-1"));
     st.values.push_back(kv("valid", bool_str(imu_report.valid)));
     array.status.push_back(std::move(st));
   }
@@ -180,24 +197,36 @@ void DiagnosticsReporter::publish(
     st.values.push_back(kv("rate_hz", rate_str(src.rates, &StatWindow::Rates::msg_hz)));
     st.values.push_back(kv("expected_rate_hz", fmt("%.2f", src.drift.expected_rate)));
     st.values.push_back(kv("expected_rate_source", src.drift.expected_rate_source()));
-    st.values.push_back(kv("bandwidth_Bps",
-      rate_str(src.rates, &StatWindow::Rates::bytes_per_sec)));
+    st.values.push_back(
+      kv(
+        "bandwidth_Bps",
+        rate_str(src.rates, &StatWindow::Rates::bytes_per_sec)));
     st.values.push_back(kv("msg_age_sec", fmt("%.3f", src.msg_age_sec)));
-    st.values.push_back(kv("stamp_offset_sec",
-      src.offset_valid ? fmt("%+.4f", src.stamp_offset_sec) : "0"));
-    st.values.push_back(kv("stamp_offset_ewma_sec",
-      src.drift.ewma_valid ? fmt("%+.4f", src.drift.offset_ewma_sec) : "0"));
-    st.values.push_back(kv("points_raw_per_sec",
-      rate_str(src.rates, &StatWindow::Rates::points_raw_per_sec)));
+    st.values.push_back(
+      kv(
+        "stamp_offset_sec",
+        src.offset_valid ? fmt("%+.4f", src.stamp_offset_sec) : "0"));
+    st.values.push_back(
+      kv(
+        "stamp_offset_ewma_sec",
+        src.drift.ewma_valid ? fmt("%+.4f", src.drift.offset_ewma_sec) : "0"));
+    st.values.push_back(
+      kv(
+        "points_raw_per_sec",
+        rate_str(src.rates, &StatWindow::Rates::points_raw_per_sec)));
     // GPU builds run per-source filters inside the merge engine, so the kept
     // count is unknown there; the node passes points_kept_per_sec < 0.
     const bool kept_known = src.rates.valid && src.rates.points_kept_per_sec >= 0.0;
-    st.values.push_back(kv("points_kept_per_sec",
-      kept_known ? fmt("%.2f", src.rates.points_kept_per_sec) : "-1"));
+    st.values.push_back(
+      kv(
+        "points_kept_per_sec",
+        kept_known ? fmt("%.2f", src.rates.points_kept_per_sec) : "-1"));
     const bool drop_known = kept_known && src.rates.points_raw_per_sec > 0.0;
-    st.values.push_back(kv("filter_drop_pct", drop_known
-      ? fmt("%.1f", 100.0 * (1.0 - src.rates.points_kept_per_sec / src.rates.points_raw_per_sec))
-      : "-1"));
+    st.values.push_back(
+      kv(
+        "filter_drop_pct", drop_known ?
+        fmt("%.1f", 100.0 * (1.0 - src.rates.points_kept_per_sec / src.rates.points_raw_per_sec)) :
+        "-1"));
     st.values.push_back(kv("pending", bool_str(src.pending)));
     st.values.push_back(kv("stale", bool_str(src.stale)));
     st.values.push_back(kv("timing_drift", bool_str(src.drift.timing_drift)));

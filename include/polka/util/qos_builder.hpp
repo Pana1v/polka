@@ -15,43 +15,50 @@
 #ifndef POLKA__UTIL__QOS_BUILDER_HPP_
 #define POLKA__UTIL__QOS_BUILDER_HPP_
 
-#include "polka/types.hpp"
-
-#include <rclcpp/rclcpp.hpp>
 #include <chrono>
 
-namespace polka {
+#include "polka/types.hpp"
+#include <rclcpp/rclcpp.hpp>
+
+namespace polka
+{
 
 inline rclcpp::QoS build_qos(const OutputQosConfig & cfg)
 {
   rclcpp::QoS qos(cfg.history_depth);
 
-  if (cfg.reliability == "best_effort")
+  if (cfg.reliability == "best_effort") {
     qos.reliability(rclcpp::ReliabilityPolicy::BestEffort);
-  else
+  } else {
     qos.reliability(rclcpp::ReliabilityPolicy::Reliable);
+  }
 
-  if (cfg.durability == "transient_local")
+  if (cfg.durability == "transient_local") {
     qos.durability(rclcpp::DurabilityPolicy::TransientLocal);
-  else
+  } else {
     qos.durability(rclcpp::DurabilityPolicy::Volatile);
+  }
 
-  if (cfg.liveliness == "manual_by_topic")
+  if (cfg.liveliness == "manual_by_topic") {
     qos.liveliness(rclcpp::LivelinessPolicy::ManualByTopic);
-  else
+  } else {
     qos.liveliness(rclcpp::LivelinessPolicy::Automatic);
+  }
 
-  if (cfg.liveliness_lease_duration_ms > 0.0)
+  if (cfg.liveliness_lease_duration_ms > 0.0) {
     qos.liveliness_lease_duration(
       std::chrono::milliseconds(static_cast<int64_t>(cfg.liveliness_lease_duration_ms)));
+  }
 
-  if (cfg.deadline_ms > 0.0)
+  if (cfg.deadline_ms > 0.0) {
     qos.deadline(
       std::chrono::milliseconds(static_cast<int64_t>(cfg.deadline_ms)));
+  }
 
-  if (cfg.lifespan_ms > 0.0)
+  if (cfg.lifespan_ms > 0.0) {
     qos.lifespan(
       std::chrono::milliseconds(static_cast<int64_t>(cfg.lifespan_ms)));
+  }
 
   return qos;
 }

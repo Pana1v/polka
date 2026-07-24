@@ -18,11 +18,13 @@
 #include <atomic>
 #include <cstdint>
 
-namespace polka {
+namespace polka
+{
 
 // Cumulative totals sampled from StatCounters. Plain values so the diagnostics
 // tick can copy them out of the hot path and diff them at leisure.
-struct StatSample {
+struct StatSample
+{
   uint64_t msgs = 0;
   uint64_t bytes = 0;
   uint64_t points_raw = 0;    // points as received, before per-source filters
@@ -33,7 +35,8 @@ struct StatSample {
 // producing subscription callback and the consuming diagnostics timer may run
 // on different threads when the node is composed into a multithreaded
 // container; relaxed ordering is enough for statistics.
-class StatCounters {
+class StatCounters
+{
 public:
   void record(uint64_t byte_count, uint64_t raw_points, uint64_t kept_points)
   {
@@ -62,9 +65,11 @@ private:
 // Turns cumulative totals into per-second rates between successive samples.
 // One instance per observed stream, owned by the diagnostics tick (single
 // caller, so no synchronization needed here).
-class StatWindow {
+class StatWindow
+{
 public:
-  struct Rates {
+  struct Rates
+  {
     bool valid = false;
     double msg_hz = 0.0;
     double bytes_per_sec = 0.0;

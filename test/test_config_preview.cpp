@@ -13,32 +13,37 @@
 // limitations under the License.
 
 #include <gtest/gtest.h>
-#include <rclcpp/rclcpp.hpp>
 
 #include <memory>
 #include <string>
 #include <vector>
 
+#include <rclcpp/rclcpp.hpp>
+
 #include "polka/config/config_loader.hpp"
 
-namespace polka {
+namespace polka
+{
 
-namespace {
+namespace
+{
 
 rclcpp::NodeOptions two_source_options()
 {
   rclcpp::NodeOptions opts;
-  opts.parameter_overrides({
-    rclcpp::Parameter("source_names", std::vector<std::string>{"a", "b"}),
-    rclcpp::Parameter("sources.a.topic", "/a/points"),
-    rclcpp::Parameter("sources.b.topic", "/b/points"),
-  });
+  opts.parameter_overrides(
+      {
+        rclcpp::Parameter("source_names", std::vector<std::string>{"a", "b"}),
+        rclcpp::Parameter("sources.a.topic", "/a/points"),
+        rclcpp::Parameter("sources.b.topic", "/b/points"),
+      });
   return opts;
 }
 
 }  // namespace
 
-class ConfigPreviewTest : public ::testing::Test {
+class ConfigPreviewTest : public ::testing::Test
+{
 protected:
   void SetUp() override
   {
@@ -151,10 +156,11 @@ TEST_F(ConfigPreviewTest, ReloadAllowsShrinkingButNotEmptying)
 TEST(ConfigLoaderStartup, EmptyTopicRejectedAtStartup)
 {
   rclcpp::NodeOptions opts;
-  opts.parameter_overrides({
-    rclcpp::Parameter("source_names", std::vector<std::string>{"a"}),
-    // sources.a.topic deliberately left at its "" default
-  });
+  opts.parameter_overrides(
+    {
+      rclcpp::Parameter("source_names", std::vector<std::string>{"a"}),
+      // sources.a.topic deliberately left at its "" default
+    });
   auto node = std::make_shared<rclcpp::Node>("polka_cfg_strict", opts);
   ConfigLoader loader(node.get());
   EXPECT_THROW(loader.load(), std::exception);

@@ -15,9 +15,11 @@
 #include <gtest/gtest.h>
 #include "polka/diag/drift_tracker.hpp"
 
-namespace polka {
+namespace polka
+{
 
-namespace {
+namespace
+{
 
 DriftTracker::Config test_config()
 {
@@ -82,13 +84,16 @@ TEST(DriftTrackerTiming, NegativeOffsetAlsoRaises)
 TEST(DriftTrackerTiming, ClearsWithHysteresis)
 {
   DriftTracker t(test_config());
-  for (int i = 0; i < 3; ++i) t.update(offset_tick(0.2));
+  for (int i = 0; i < 3; ++i) {
+    t.update(offset_tick(0.2));
+  }
   ASSERT_TRUE(t.status().timing_drift);
 
   // 0.09 is below the 0.1 raise threshold but above the 0.8*0.1 clear
   // threshold: the flag must hold (this is the hysteresis band).
-  for (int i = 0; i < 10; ++i)
+  for (int i = 0; i < 10; ++i) {
     EXPECT_TRUE(t.update(offset_tick(0.09)).timing_drift);
+  }
 
   // Below the clear threshold: needs min_ticks consecutive ticks to clear.
   EXPECT_TRUE(t.update(offset_tick(0.01)).timing_drift);
@@ -105,8 +110,12 @@ TEST(DriftTrackerTiming, EwmaSmoothsSpikes)
   DriftTracker t(cfg);
   // A single huge spike into a settled-at-zero EWMA must not push the
   // smoothed offset over threshold (0.2 * 0.3 = 0.06 < 0.1).
-  for (int i = 0; i < 10; ++i) t.update(offset_tick(0.0));
-  for (int i = 0; i < 3; ++i) t.update(offset_tick(0.3));
+  for (int i = 0; i < 10; ++i) {
+    t.update(offset_tick(0.0));
+  }
+  for (int i = 0; i < 3; ++i) {
+    t.update(offset_tick(0.3));
+  }
   // 3 ticks of 0.3 through alpha=0.2 EWMA: 0.06, 0.108, 0.146 - only 2 ticks
   // exceed 0.1, so the flag is still down.
   EXPECT_FALSE(t.status().timing_drift);
@@ -127,7 +136,9 @@ TEST(DriftTrackerRate, ExplicitExpectedRateRaisesAndClears)
 {
   DriftTracker t(test_config());  // expected 10 Hz, sag 20% -> raise below 8 Hz
   EXPECT_FALSE(t.update(rate_tick(9.0)).rate_drift);   // above sag floor
-  for (int i = 0; i < 2; ++i) t.update(rate_tick(6.0));
+  for (int i = 0; i < 2; ++i) {
+    t.update(rate_tick(6.0));
+  }
   auto s = t.update(rate_tick(6.0));
   EXPECT_TRUE(s.rate_drift);
   EXPECT_TRUE(s.rate_raised);
@@ -157,7 +168,9 @@ TEST(DriftTrackerRate, AutoBaselineLocksMedianThenDetectsSag)
   EXPECT_STREQ(s.expected_rate_source(), "auto");
   EXPECT_NEAR(s.expected_rate, 10.0, 0.01);  // median of 10.0, 10.2, 9.8
 
-  for (int i = 0; i < 3; ++i) t.update(rate_tick(5.0));
+  for (int i = 0; i < 3; ++i) {
+    t.update(rate_tick(5.0));
+  }
   EXPECT_TRUE(t.status().rate_drift);
 }
 
@@ -174,15 +187,18 @@ TEST(DriftTrackerRate, InvalidRateTicksDoNotAdvanceStreaks)
 TEST(DriftTrackerRate, SetConfigResetsTracking)
 {
   DriftTracker t(test_config());
-  for (int i = 0; i < 3; ++i) t.update(rate_tick(5.0));
+  for (int i = 0; i < 3; ++i) {
+    t.update(rate_tick(5.0));
+  }
   ASSERT_TRUE(t.status().rate_drift);
 
   auto cfg = test_config();
   cfg.expected_rate = 5.0;  // operator declares 5 Hz is nominal
   t.set_config(cfg);
   EXPECT_FALSE(t.status().rate_drift);
-  for (int i = 0; i < 5; ++i)
+  for (int i = 0; i < 5; ++i) {
     EXPECT_FALSE(t.update(rate_tick(5.0)).rate_drift);
+  }
 }
 
 }  // namespace polka

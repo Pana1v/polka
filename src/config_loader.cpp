@@ -18,7 +18,8 @@
 #include <set>
 #include <stdexcept>
 
-namespace polka {
+namespace polka
+{
 
 ConfigLoader::ConfigLoader(rclcpp::Node * node)
 : node_(node), logger_(node->get_logger())
@@ -30,7 +31,7 @@ rclcpp::Parameter ConfigLoader::param(const std::string & name) const
 {
   if (overlay_) {
     for (const auto & p : *overlay_) {
-      if (p.get_name() == name) return p;
+      if (p.get_name() == name) {return p;}
     }
   }
   return node_->get_parameter(name);
@@ -41,11 +42,12 @@ T ConfigLoader::param_or(const std::string & name, const T & def) const
 {
   if (overlay_) {
     for (const auto & p : *overlay_) {
-      if (p.get_name() == name) return p.get_value<T>();
+      if (p.get_name() == name) {return p.get_value<T>();}
     }
   }
-  if (node_->has_parameter(name))
+  if (node_->has_parameter(name)) {
     return node_->get_parameter(name).get_value<T>();
+  }
   return def;
 }
 
@@ -103,7 +105,9 @@ void ConfigLoader::declare_defaults()
   node_->declare_parameter<double>("outputs.cloud.filters.range.max", 30.0);
   node_->declare_parameter<bool>("outputs.cloud.filters.angular.enabled", false);
   node_->declare_parameter<bool>("outputs.cloud.filters.angular.invert", false);
-  node_->declare_parameter<std::vector<double>>("outputs.cloud.filters.angular.ranges", {0.0, 360.0});
+  node_->declare_parameter<std::vector<double>>(
+    "outputs.cloud.filters.angular.ranges",
+    {0.0, 360.0});
   node_->declare_parameter<bool>("outputs.cloud.filters.box.enabled", false);
   node_->declare_parameter<double>("outputs.cloud.filters.box.x_min", -20.0);
   node_->declare_parameter<double>("outputs.cloud.filters.box.x_max", 20.0);
@@ -156,8 +160,9 @@ void ConfigLoader::declare_defaults()
 void ConfigLoader::declare_source_params(const std::string & name)
 {
   std::string p = "sources." + name;
-  if (node_->has_parameter(p + ".topic")) return;  // re-added source: keep prior values
-
+  if (node_->has_parameter(p + ".topic")) {
+    return;                                         // re-added source: keep prior values
+  }
   node_->declare_parameter<std::string>(p + ".topic", "");
   node_->declare_parameter<std::string>(p + ".imu_topic", "");
   node_->declare_parameter<std::string>(p + ".type", "pointcloud2");
@@ -207,8 +212,8 @@ FilterParams ConfigLoader::load_filter_params(const std::string & prefix)
   for (size_t i = 0; i + 1 < ang_flat.size(); i += 2) {
     double lo = std::fmod(ang_flat[i], 360.0);
     double hi = std::fmod(ang_flat[i + 1], 360.0);
-    if (lo < 0.0) lo += 360.0;
-    if (hi < 0.0) hi += 360.0;
+    if (lo < 0.0) {lo += 360.0;}
+    if (hi < 0.0) {hi += 360.0;}
     fp.angular_ranges.emplace_back(lo, hi);
   }
 
@@ -242,17 +247,23 @@ MergeConfig ConfigLoader::read_common_params()
   cfg.max_source_spread_warn = param("max_source_spread_warn").as_double();
 
   auto ts_str = param("timestamp_strategy").as_string();
-  if (ts_str == "earliest") cfg.timestamp_strategy = TimestampStrategy::EARLIEST;
-  else if (ts_str == "latest") cfg.timestamp_strategy = TimestampStrategy::LATEST;
-  else if (ts_str == "average") cfg.timestamp_strategy = TimestampStrategy::AVERAGE;
-  else if (ts_str == "local") cfg.timestamp_strategy = TimestampStrategy::LOCAL;
-  else throw std::runtime_error("polka: invalid timestamp_strategy '" + ts_str + "'");
+  if (ts_str == "earliest") {
+    cfg.timestamp_strategy = TimestampStrategy::EARLIEST;
+  } else if (ts_str == "latest") {
+    cfg.timestamp_strategy = TimestampStrategy::LATEST;
+  } else if (ts_str == "average") {
+    cfg.timestamp_strategy = TimestampStrategy::AVERAGE;
+  } else if (ts_str == "local") {cfg.timestamp_strategy = TimestampStrategy::LOCAL;} else {
+    throw std::runtime_error("polka: invalid timestamp_strategy '" + ts_str + "'");
+  }
 
   cfg.point_timestamps.enabled = param("point_timestamps.enabled").as_bool();
   auto ppt_mode = param("point_timestamps.mode").as_string();
-  if (ppt_mode == "offset") cfg.point_timestamps.mode = PerPointTimeMode::OFFSET;
-  else if (ppt_mode == "absolute") cfg.point_timestamps.mode = PerPointTimeMode::ABSOLUTE;
-  else throw std::runtime_error("polka: invalid point_timestamps.mode '" + ppt_mode + "'");
+  if (ppt_mode == "offset") {
+    cfg.point_timestamps.mode = PerPointTimeMode::OFFSET;
+  } else if (ppt_mode == "absolute") {
+    cfg.point_timestamps.mode = PerPointTimeMode::ABSOLUTE;
+  } else {throw std::runtime_error("polka: invalid point_timestamps.mode '" + ppt_mode + "'");}
   cfg.suppress_duplicate_timestamps =
     param("suppress_duplicate_timestamps").as_bool();
 
@@ -295,8 +306,9 @@ MergeConfig ConfigLoader::read_common_params()
     double lx = param("outputs.cloud.voxel.leaf_x").as_double();
     double ly = param("outputs.cloud.voxel.leaf_y").as_double();
     double lz = param("outputs.cloud.voxel.leaf_z").as_double();
-    if (uniform > 0.0 && lx == 0.0 && ly == 0.0 && lz == 0.0)
+    if (uniform > 0.0 && lx == 0.0 && ly == 0.0 && lz == 0.0) {
       lx = ly = lz = uniform;
+    }
     cfg.cloud_output.voxel.leaf_x = static_cast<float>(lx);
     cfg.cloud_output.voxel.leaf_y = static_cast<float>(ly);
     cfg.cloud_output.voxel.leaf_z = static_cast<float>(lz);
@@ -353,16 +365,18 @@ MergeConfig ConfigLoader::read_config(
 {
   const bool may_declare = (overlay_ == nullptr);  // preview must not mutate node state
   if (may_declare) {
-    for (const auto & name : source_names)
+    for (const auto & name : source_names) {
       declare_source_params(name);
+    }
   }
 
   MergeConfig cfg = read_common_params();
   cfg.cloud_output.self_filter =
     load_self_filter_config("outputs.cloud.self_filter", may_declare);
 
-  for (const auto & name : source_names)
+  for (const auto & name : source_names) {
     cfg.sources.push_back(read_source_config(name));
+  }
 
   validate(cfg, allow_pending);
   return cfg;
@@ -371,13 +385,13 @@ MergeConfig ConfigLoader::read_config(
 MergeConfig ConfigLoader::load()
 {
   auto source_names = node_->get_parameter("source_names").as_string_array();
-  return read_config(source_names, /*allow_pending=*/false);
+  return read_config(source_names, /*allow_pending=*/ false);
   // Summary printed via PolkaNode startup banner once construction completes.
 }
 
 MergeConfig ConfigLoader::reload(const std::vector<std::string> & source_names)
 {
-  return read_config(source_names, /*allow_pending=*/true);
+  return read_config(source_names, /*allow_pending=*/ true);
 }
 
 MergeConfig ConfigLoader::preview(
@@ -386,7 +400,7 @@ MergeConfig ConfigLoader::preview(
 {
   overlay_ = &proposed;
   try {
-    MergeConfig cfg = read_config(source_names, /*allow_pending=*/true);
+    MergeConfig cfg = read_config(source_names, /*allow_pending=*/ true);
     overlay_ = nullptr;
     return cfg;
   } catch (...) {
@@ -400,7 +414,7 @@ SelfFilterConfig ConfigLoader::load_self_filter_config(
 {
   SelfFilterConfig sf;
   sf.enabled = param(prefix + ".enabled").as_bool();
-  if (!sf.enabled) return sf;
+  if (!sf.enabled) {return sf;}
 
   auto box_names = param(prefix + ".box_names").as_string_array();
   for (const auto & name : box_names) {
@@ -429,20 +443,26 @@ SelfFilterConfig ConfigLoader::load_self_filter_config(
 
 void ConfigLoader::validate(const MergeConfig & config, bool allow_pending)
 {
-  if (config.sources.empty())
+  if (config.sources.empty()) {
     throw std::runtime_error("polka: source_names is empty");
-  if (config.output_rate <= 0.0 && config.output_rate != -1.0)
+  }
+  if (config.output_rate <= 0.0 && config.output_rate != -1.0) {
     throw std::runtime_error("polka: output_rate must be > 0 or -1 (adaptive)");
-  if (config.source_timeout <= 0.0)
+  }
+  if (config.source_timeout <= 0.0) {
     throw std::runtime_error("polka: source_timeout must be > 0");
-  if (!config.cloud_output.enabled && !config.scan_output.enabled)
+  }
+  if (!config.cloud_output.enabled && !config.scan_output.enabled) {
     throw std::runtime_error("polka: at least one output (cloud or scan) must be enabled");
+  }
   if (config.cloud_output.voxel.enabled) {
     if (config.cloud_output.voxel.leaf_x <= 0.0f ||
-        config.cloud_output.voxel.leaf_y <= 0.0f ||
-        config.cloud_output.voxel.leaf_z <= 0.0f)
+      config.cloud_output.voxel.leaf_y <= 0.0f ||
+      config.cloud_output.voxel.leaf_z <= 0.0f)
+    {
       throw std::runtime_error(
-        "polka: voxel filter enabled but leaf size is <= 0 (would crash pcl::VoxelGrid)");
+              "polka: voxel filter enabled but leaf size is <= 0 (would crash pcl::VoxelGrid)");
+    }
   }
   try {
     config.diagnostics.validate();
@@ -451,17 +471,21 @@ void ConfigLoader::validate(const MergeConfig & config, bool allow_pending)
   }
   std::set<std::string> seen;
   for (const auto & src : config.sources) {
-    if (src.name.empty())
+    if (src.name.empty()) {
       throw std::runtime_error("polka: source names must be non-empty");
-    if (!seen.insert(src.name).second)
+    }
+    if (!seen.insert(src.name).second) {
       throw std::runtime_error("polka: duplicate source name '" + src.name + "'");
-    if (src.expected_rate < 0.0)
+    }
+    if (src.expected_rate < 0.0) {
       throw std::runtime_error(
-        "polka: sources." + src.name + ".expected_rate must be >= 0");
+              "polka: sources." + src.name + ".expected_rate must be >= 0");
+    }
     // A pending source (empty topic) is legal at runtime - it activates once
     // its topic is set - but a startup config demands complete sources.
-    if (!allow_pending && src.topic.empty())
+    if (!allow_pending && src.topic.empty()) {
       throw std::runtime_error("polka: source '" + src.name + "' has empty topic");
+    }
   }
 }
 

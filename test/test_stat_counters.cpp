@@ -15,7 +15,8 @@
 #include <gtest/gtest.h>
 #include "polka/diag/stat_counters.hpp"
 
-namespace polka {
+namespace polka
+{
 
 TEST(StatCounters, RecordAccumulates)
 {

@@ -13,9 +13,6 @@
 // limitations under the License.
 
 #include <gtest/gtest.h>
-#include <rclcpp/rclcpp.hpp>
-#include <sensor_msgs/msg/point_cloud2.hpp>
-#include <sensor_msgs/point_cloud2_iterator.hpp>
 
 #include <array>
 #include <chrono>
@@ -24,13 +21,19 @@
 #include <thread>
 #include <vector>
 
+#include <rclcpp/rclcpp.hpp>
+#include <sensor_msgs/msg/point_cloud2.hpp>
+#include <sensor_msgs/point_cloud2_iterator.hpp>
+
 #include "polka/polka_node.hpp"
 
 using namespace std::chrono_literals;
 
-namespace polka {
+namespace polka
+{
 
-namespace {
+namespace
+{
 
 sensor_msgs::msg::PointCloud2 make_cloud(
   const std::vector<std::array<float, 3>> & points, const rclcpp::Time & stamp)
@@ -59,21 +62,23 @@ sensor_msgs::msg::PointCloud2 make_cloud(
 
 }  // namespace
 
-class RuntimeReconfigureTest : public ::testing::Test {
+class RuntimeReconfigureTest : public ::testing::Test
+{
 protected:
   void SetUp() override
   {
     rclcpp::NodeOptions opts;
-    opts.parameter_overrides({
-      rclcpp::Parameter("source_names", std::vector<std::string>{"s1", "s2"}),
-      rclcpp::Parameter("sources.s1.topic", "/t1"),
-      rclcpp::Parameter("sources.s2.topic", "/t2"),
-      rclcpp::Parameter("enable_gpu", false),
-      rclcpp::Parameter("outputs.cloud.topic", "/merged_test"),
-      rclcpp::Parameter("output_rate", 20.0),
-      // Generous so a slow CI machine cannot stale-out mid-test.
-      rclcpp::Parameter("source_timeout", 5.0),
-    });
+    opts.parameter_overrides(
+      {
+        rclcpp::Parameter("source_names", std::vector<std::string>{"s1", "s2"}),
+        rclcpp::Parameter("sources.s1.topic", "/t1"),
+        rclcpp::Parameter("sources.s2.topic", "/t2"),
+        rclcpp::Parameter("enable_gpu", false),
+        rclcpp::Parameter("outputs.cloud.topic", "/merged_test"),
+        rclcpp::Parameter("output_rate", 20.0),
+        // Generous so a slow CI machine cannot stale-out mid-test.
+        rclcpp::Parameter("source_timeout", 5.0),
+      });
     node_ = std::make_shared<PolkaNode>(opts);
     helper_ = std::make_shared<rclcpp::Node>("helper");
     exec_.add_node(node_);
@@ -100,7 +105,7 @@ protected:
   {
     const auto deadline = std::chrono::steady_clock::now() + timeout;
     while (std::chrono::steady_clock::now() < deadline) {
-      if (pred()) return true;
+      if (pred()) {return true;}
       exec_.spin_some();
       std::this_thread::sleep_for(2ms);
     }
@@ -124,14 +129,16 @@ TEST_F(RuntimeReconfigureTest, AddPendingSourceThenActivateThenRemove)
   // Setting its topic activates it: the subscription must appear on the graph.
   result = node_->set_parameter(rclcpp::Parameter("sources.extra.topic", "/t3"));
   ASSERT_TRUE(result.successful) << result.reason;
-  ASSERT_TRUE(spin_until(
+  ASSERT_TRUE(
+    spin_until(
       [&]() {return helper_->count_subscribers("/t3") == 1u;}, 2000ms));
 
   // Removing the name tears the subscription down again.
   result = node_->set_parameter(
     rclcpp::Parameter("source_names", std::vector<std::string>{"s1", "s2"}));
   ASSERT_TRUE(result.successful) << result.reason;
-  ASSERT_TRUE(spin_until(
+  ASSERT_TRUE(
+    spin_until(
       [&]() {return helper_->count_subscribers("/t3") == 0u;}, 2000ms));
 }
 
@@ -140,10 +147,11 @@ TEST_F(RuntimeReconfigureTest, TopicChangeRecreatesSubscription)
   ASSERT_EQ(helper_->count_subscribers("/t1"), 1u);
   auto result = node_->set_parameter(rclcpp::Parameter("sources.s1.topic", "/t1b"));
   ASSERT_TRUE(result.successful) << result.reason;
-  ASSERT_TRUE(spin_until(
+  ASSERT_TRUE(
+    spin_until(
       [&]() {
         return helper_->count_subscribers("/t1") == 0u &&
-               helper_->count_subscribers("/t1b") == 1u;
+        helper_->count_subscribers("/t1b") == 1u;
       }, 2000ms));
 }
 
@@ -187,10 +195,11 @@ TEST_F(RuntimeReconfigureTest, FirstFilterSetAffectsNextOutput)
   EXPECT_EQ(merged->width, 2u);
 
   // First-ever filter set: enable the range filter and cap it at 4 m.
-  auto result = node_->set_parameters_atomically({
-    rclcpp::Parameter("sources.s1.filters.range.enabled", true),
-    rclcpp::Parameter("sources.s1.filters.range.max", 4.0),
-  });
+  auto result = node_->set_parameters_atomically(
+    {
+      rclcpp::Parameter("sources.s1.filters.range.enabled", true),
+      rclcpp::Parameter("sources.s1.filters.range.max", 4.0),
+    });
   ASSERT_TRUE(result.successful) << result.reason;
   spin_for(100ms);  // let the deferred apply run
 
@@ -204,10 +213,11 @@ TEST_F(RuntimeReconfigureTest, FirstFilterSetAffectsNextOutput)
 // adapters holding a getter that dereferenced the reset ImuBuffer.
 TEST_F(RuntimeReconfigureTest, MotionCompToggleThenTrafficDoesNotCrash)
 {
-  auto result = node_->set_parameters_atomically({
-    rclcpp::Parameter("motion_compensation.enabled", true),
-    rclcpp::Parameter("motion_compensation.imu_topic", "/imu"),
-  });
+  auto result = node_->set_parameters_atomically(
+    {
+      rclcpp::Parameter("motion_compensation.enabled", true),
+      rclcpp::Parameter("motion_compensation.imu_topic", "/imu"),
+    });
   ASSERT_TRUE(result.successful) << result.reason;
   spin_for(100ms);
 

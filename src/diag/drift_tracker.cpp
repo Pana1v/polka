@@ -17,9 +17,11 @@
 #include <algorithm>
 #include <cmath>
 
-namespace polka {
+namespace polka
+{
 
-namespace {
+namespace
+{
 constexpr double kClearFraction = 0.8;  // clear threshold as fraction of raise threshold
 }
 
@@ -43,8 +45,9 @@ void DriftTracker::reset_state()
 {
   status_ = Status();
   status_.expected_rate_from_param = cfg_.expected_rate > 0.0;
-  if (status_.expected_rate_from_param)
+  if (status_.expected_rate_from_param) {
     status_.expected_rate = cfg_.expected_rate;
+  }
   timing_bad_streak_ = 0;
   timing_good_streak_ = 0;
   rate_bad_streak_ = 0;
@@ -69,7 +72,7 @@ void DriftTracker::update_timing(const Input & in)
 {
   // A tick without an offset (peers stale, single source) carries no evidence
   // either way: freeze the streaks rather than counting it as good or bad.
-  if (!in.has_offset) return;
+  if (!in.has_offset) {return;}
 
   if (!status_.ewma_valid) {
     status_.offset_ewma_sec = in.stamp_offset_sec;
@@ -105,7 +108,7 @@ void DriftTracker::update_timing(const Input & in)
 
 void DriftTracker::update_rate(const Input & in)
 {
-  if (!in.has_rate) return;
+  if (!in.has_rate) {return;}
 
   // Auto-baseline: observe until the window fills, then lock the median as
   // the expected rate. Median (not mean) so a slow startup tick can't drag

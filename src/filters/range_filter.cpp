@@ -14,7 +14,8 @@
 
 #include "polka/filters/range_filter.hpp"
 
-namespace polka {
+namespace polka
+{
 
 RangeFilter::RangeFilter(double min_range, double max_range)
 : min_range_sq_(static_cast<float>(min_range * min_range)),

@@ -12,21 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#ifndef POLKA__INPUT__SOURCE_ADAPTER_HPP
-#define POLKA__INPUT__SOURCE_ADAPTER_HPP
+#ifndef POLKA__INPUT__SOURCE_ADAPTER_HPP_
+#define POLKA__INPUT__SOURCE_ADAPTER_HPP_
 
-#include "polka/types.hpp"
-#include "polka/diag/stat_counters.hpp"
-#include "polka/input/imu_buffer.hpp"
-#include "polka/filters/i_filter.hpp"
-
-#include <rclcpp/rclcpp.hpp>
-#include <sensor_msgs/msg/point_cloud2.hpp>
-#include <sensor_msgs/msg/laser_scan.hpp>
-#include <laser_geometry/laser_geometry.hpp>
 #include <tf2_ros/buffer.h>
-
 #include <Eigen/Core>
+
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -34,37 +25,49 @@
 #include <vector>
 #include <atomic>
 
-namespace polka {
+#include "polka/types.hpp"
+#include "polka/diag/stat_counters.hpp"
+#include "polka/input/imu_buffer.hpp"
+#include "polka/filters/i_filter.hpp"
+#include <rclcpp/rclcpp.hpp>
+#include <sensor_msgs/msg/point_cloud2.hpp>
+#include <sensor_msgs/msg/laser_scan.hpp>
+#include <laser_geometry/laser_geometry.hpp>
 
-class SourceAdapter {
+namespace polka
+{
+
+class SourceAdapter
+{
 public:
   using ImuGetter = std::function<std::shared_ptr<const AveragedImu>()>;
 
-  SourceAdapter(rclcpp::Node * node, const SourceConfig & config, bool gpu_filters = false,
-                ImuGetter imu_getter = nullptr, bool deskew_enabled = false,
-                const std::string & timestamp_field_hint = "auto",
-                std::shared_ptr<tf2_ros::Buffer> tf_buffer = nullptr,
-                int imu_buffer_size = 200);
+  SourceAdapter(
+    rclcpp::Node * node, const SourceConfig & config, bool gpu_filters = false,
+    ImuGetter imu_getter = nullptr, bool deskew_enabled = false,
+    const std::string & timestamp_field_hint = "auto",
+    std::shared_ptr<tf2_ros::Buffer> tf_buffer = nullptr,
+    int imu_buffer_size = 200);
 
   CloudT::ConstPtr get_latest() const;
   bool is_stale(double timeout_sec, const rclcpp::Time & now) const;
-  bool received() const { return has_received_.load(); }
+  bool received() const {return has_received_.load();}
   rclcpp::Time last_stamp() const;
-  std::string name() const { return config_.name; }
+  std::string name() const {return config_.name;}
   std::string frame_id() const;
-  uint64_t message_count() const { return message_counter_.load(); }
-  const FilterParams & filter_params() const { return config_.filter_params; }
+  uint64_t message_count() const {return message_counter_.load();}
+  const FilterParams & filter_params() const {return config_.filter_params;}
   void rebuild_filters(const FilterParams & fp);
 
   // Cumulative traffic totals for the diagnostics tick (rates are derived
   // there by differencing successive samples).
-  StatSample stats() const { return stats_.sample(); }
+  StatSample stats() const {return stats_.sample();}
   // True once a message arrived whose fields failed validation (the source
   // drops everything from then on) - surfaced as a diagnostics ERROR.
-  bool fields_invalid() const { return fields_validated_ && !fields_valid_; }
+  bool fields_invalid() const {return fields_validated_ && !fields_valid_;}
   // True only once deskewing is both configured on and this source's actual
   // messages were found to carry a usable per-point timestamp field.
-  bool deskew_active() const { return deskew_enabled_ && has_timestamp_field_; }
+  bool deskew_active() const {return deskew_enabled_ && has_timestamp_field_;}
 
 private:
   void pc2_callback(sensor_msgs::msg::PointCloud2::ConstSharedPtr msg);
@@ -78,8 +81,9 @@ private:
   double extract_point_time(const uint8_t * point_data) const;
   // Fill each point's 'time' field with its absolute acquisition time (Unix sec).
   void populate_point_time(CloudT & cloud, const sensor_msgs::msg::PointCloud2 & raw_msg);
-  void deskew_cloud(CloudT & cloud, const sensor_msgs::msg::PointCloud2 & raw_msg,
-                    const AveragedImu & imu);
+  void deskew_cloud(
+    CloudT & cloud, const sensor_msgs::msg::PointCloud2 & raw_msg,
+    const AveragedImu & imu);
 
   rclcpp::Node * node_;
   SourceConfig config_;
@@ -117,8 +121,13 @@ private:
   // Per-source IMU (when configured) and TF for frame rotation
   std::shared_ptr<ImuBuffer> local_imu_;
   std::shared_ptr<tf2_ros::Buffer> tf_buffer_;
+
+  // Perf instrumentation: rolling deskew-loop latency, logged every N calls.
+  uint64_t deskew_calls_{0};
+  double deskew_total_us_{0.0};
+  double deskew_max_us_{0.0};
 };
 
 }  // namespace polka
 
-#endif  // POLKA__INPUT__SOURCE_ADAPTER_HPP
+#endif  // POLKA__INPUT__SOURCE_ADAPTER_HPP_

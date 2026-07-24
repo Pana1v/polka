@@ -13,16 +13,13 @@
 // limitations under the License.
 
 #include "polka/polka_node.hpp"
-#include "polka/util/log_format.hpp"
-#include "polka/util/qos_builder.hpp"
-#include "polka/util/se3_exp.hpp"
-#include "polka/merge_engine/cpu_merge_engine.hpp"
 
 #include <pcl_conversions/pcl_conversions.h>
 #include <pcl/console/print.h>
 #include <pcl/common/io.h>
-#include <tf2_eigen/tf2_eigen.hpp>
-#include <rcl_interfaces/msg/set_parameters_result.hpp>
+#ifdef POLKA_CUDA_ENABLED
+#include <cuda_runtime.h>
+#endif
 
 #include <algorithm>
 #include <chrono>
@@ -31,14 +28,22 @@
 #include <sstream>
 #include <utility>
 
+#include "polka/util/log_format.hpp"
+#include "polka/util/qos_builder.hpp"
+#include "polka/util/se3_exp.hpp"
+#include "polka/merge_engine/cpu_merge_engine.hpp"
+#include <tf2_eigen/tf2_eigen.hpp>
+#include <rcl_interfaces/msg/set_parameters_result.hpp>
+
 #ifdef POLKA_CUDA_ENABLED
 #include "polka/merge_engine/cuda_merge_engine.hpp"
-#include <cuda_runtime.h>
 #endif
 
-namespace polka {
+namespace polka
+{
 
-namespace {
+namespace
+{
 
 double steady_seconds(std::chrono::steady_clock::time_point tp)
 {
@@ -87,21 +92,25 @@ PolkaNode::PolkaNode(const rclcpp::NodeOptions & options)
     if (device_count > 0) {
       merge_engine_ = std::make_unique<CudaMergeEngine>(config_);
     } else {
-      RCLCPP_WARN(get_logger(),
+      RCLCPP_WARN(
+        get_logger(),
         "polka: enable_gpu=true but no CUDA device found, falling back to CPU");
     }
   }
 #endif
-  if (!merge_engine_)
+  if (!merge_engine_) {
     merge_engine_ = std::make_unique<CpuMergeEngine>();
+  }
 
-  if (config_.motion_compensation.enabled && !config_.motion_compensation.imu_topic.empty())
+  if (config_.motion_compensation.enabled && !config_.motion_compensation.imu_topic.empty()) {
     global_imu_ = std::make_shared<ImuBuffer>(
       this, config_.motion_compensation.imu_topic,
       config_.motion_compensation.imu_buffer_size);
-  else if (config_.motion_compensation.enabled)
-    RCLCPP_WARN(get_logger(),
+  } else if (config_.motion_compensation.enabled) {
+    RCLCPP_WARN(
+      get_logger(),
       "polka: motion compensation enabled but imu_topic is empty, deskewing will not activate");
+  }
 
   for (const auto & src_cfg : config_.sources) {
     SourceSlot slot;
@@ -115,12 +124,14 @@ PolkaNode::PolkaNode(const rclcpp::NodeOptions & options)
   output_pipeline_.configure(config_.cloud_output);
   scan_builder_.configure(config_.scan_output, config_.output_rate, config_.output_frame_id);
 
-  if (config_.cloud_output.enabled)
+  if (config_.cloud_output.enabled) {
     cloud_pub_ = create_publisher<sensor_msgs::msg::PointCloud2>(
       config_.cloud_output.topic, build_qos(config_.cloud_output.qos));
-  if (config_.scan_output.enabled)
+  }
+  if (config_.scan_output.enabled) {
     scan_pub_ = create_publisher<sensor_msgs::msg::LaserScan>(
       config_.scan_output.topic, build_qos(config_.scan_output.qos));
+  }
 
   if (config_.output_rate > 0.0) {
     auto period = std::chrono::duration<double>(1.0 / config_.output_rate);
@@ -138,14 +149,15 @@ PolkaNode::PolkaNode(const rclcpp::NodeOptions & options)
 
 SourceAdapter::ImuGetter PolkaNode::make_imu_getter(const MergeConfig & cfg)
 {
-  if (!cfg.motion_compensation.enabled || !cfg.motion_compensation.per_point_deskew)
+  if (!cfg.motion_compensation.enabled || !cfg.motion_compensation.per_point_deskew) {
     return nullptr;
+  }
   // Resolve global_imu_ at call time, not capture time: a runtime reconfigure
   // may reset or replace the buffer while adapters keep this getter.
   return [this]() -> std::shared_ptr<const AveragedImu> {
-      auto imu = global_imu_;
-      return imu ? imu->snapshot() : nullptr;
-    };
+           auto imu = global_imu_;
+           return imu ? imu->snapshot() : nullptr;
+         };
 }
 
 std::unique_ptr<SourceAdapter> PolkaNode::make_adapter(
@@ -179,12 +191,13 @@ rcl_interfaces::msg::SetParametersResult PolkaNode::validate_parameters(
   result.successful = true;
   // apply_reconfigure() declares parameters for newly added sources, which
   // re-enters this callback; those declares carry defaults and need no check.
-  if (applying_) return result;
+  if (applying_) {return result;}
 
   std::vector<std::string> names = source_names_;
   for (const auto & p : params) {
-    if (p.get_name() == "source_names")
+    if (p.get_name() == "source_names") {
       names = p.as_string_array();
+    }
   }
 
   try {
@@ -234,7 +247,7 @@ void PolkaNode::apply_reconfigure()
   std::vector<std::string> changes;
 
   if (new_config.output_rate != old_config.output_rate && new_config.output_rate > 0.0) {
-    if (output_timer_) output_timer_->cancel();
+    if (output_timer_) {output_timer_->cancel();}
     auto period = std::chrono::duration<double>(1.0 / new_config.output_rate);
     output_timer_ = create_wall_timer(
       std::chrono::duration_cast<std::chrono::nanoseconds>(period),
@@ -250,28 +263,34 @@ void PolkaNode::apply_reconfigure()
       cloud_pub_.reset();
       changes.emplace_back("cloud_output=off");
     }
-  } else if (!cloud_pub_ ||
-    new_config.cloud_output.topic != old_config.cloud_output.topic ||
-    !qos_equal(new_config.cloud_output.qos, old_config.cloud_output.qos))
-  {
-    changes.emplace_back(cloud_pub_ ?
-      "cloud_output='" + new_config.cloud_output.topic + "'" : "cloud_output=on");
-    cloud_pub_ = create_publisher<sensor_msgs::msg::PointCloud2>(
-      new_config.cloud_output.topic, build_qos(new_config.cloud_output.qos));
+  } else {
+    const bool recreate = !cloud_pub_ ||
+      new_config.cloud_output.topic != old_config.cloud_output.topic ||
+      !qos_equal(new_config.cloud_output.qos, old_config.cloud_output.qos);
+    if (recreate) {
+      changes.emplace_back(
+        cloud_pub_ ?
+        "cloud_output='" + new_config.cloud_output.topic + "'" : "cloud_output=on");
+      cloud_pub_ = create_publisher<sensor_msgs::msg::PointCloud2>(
+        new_config.cloud_output.topic, build_qos(new_config.cloud_output.qos));
+    }
   }
   if (!new_config.scan_output.enabled) {
     if (scan_pub_) {
       scan_pub_.reset();
       changes.emplace_back("scan_output=off");
     }
-  } else if (!scan_pub_ ||
-    new_config.scan_output.topic != old_config.scan_output.topic ||
-    !qos_equal(new_config.scan_output.qos, old_config.scan_output.qos))
-  {
-    changes.emplace_back(scan_pub_ ?
-      "scan_output='" + new_config.scan_output.topic + "'" : "scan_output=on");
-    scan_pub_ = create_publisher<sensor_msgs::msg::LaserScan>(
-      new_config.scan_output.topic, build_qos(new_config.scan_output.qos));
+  } else {
+    const bool recreate = !scan_pub_ ||
+      new_config.scan_output.topic != old_config.scan_output.topic ||
+      !qos_equal(new_config.scan_output.qos, old_config.scan_output.qos);
+    if (recreate) {
+      changes.emplace_back(
+        scan_pub_ ?
+        "scan_output='" + new_config.scan_output.topic + "'" : "scan_output=on");
+      scan_pub_ = create_publisher<sensor_msgs::msg::LaserScan>(
+        new_config.scan_output.topic, build_qos(new_config.scan_output.qos));
+    }
   }
 
 #ifdef POLKA_CUDA_ENABLED
@@ -293,7 +312,8 @@ void PolkaNode::apply_reconfigure()
     new_mc.imu_buffer_size != old_mc.imu_buffer_size))
   {
     global_imu_ = std::make_shared<ImuBuffer>(this, new_mc.imu_topic, new_mc.imu_buffer_size);
-    changes.emplace_back(imu_was ?
+    changes.emplace_back(
+      imu_was ?
       "imu_topic='" + new_mc.imu_topic + "'" : "motion_compensation=on");
   } else if (!imu_now && imu_was) {
     // Adapters read global_imu_ through the null-safe getter, so dropping the
@@ -304,7 +324,8 @@ void PolkaNode::apply_reconfigure()
   if (new_mc.enabled && new_mc.imu_topic.empty() &&
     !(old_mc.enabled && old_mc.imu_topic.empty()))
   {
-    RCLCPP_WARN(get_logger(),
+    RCLCPP_WARN(
+      get_logger(),
       "polka: motion compensation enabled but imu_topic is empty, deskewing will not activate");
   }
 
@@ -312,8 +333,9 @@ void PolkaNode::apply_reconfigure()
 
   if (new_config.output_frame_id != old_config.output_frame_id) {
     // Cached fallback transforms target the old frame; invalidate them.
-    for (auto & slot : sources_)
+    for (auto & slot : sources_) {
       slot.last_good_transform = Eigen::Isometry3d::Identity();
+    }
     changes.emplace_back("output_frame_id='" + new_config.output_frame_id + "'");
   }
 
@@ -331,7 +353,7 @@ void PolkaNode::apply_reconfigure()
   } else {
     std::string joined;
     for (size_t i = 0; i < changes.size(); ++i) {
-      if (i) joined += ", ";
+      if (i) {joined += ", ";}
       joined += changes[i];
     }
     RCLCPP_INFO(get_logger(), "polka: reconfigured — %s", joined.c_str());
@@ -388,10 +410,12 @@ void PolkaNode::rebuild_sources(
           changes.emplace_back("source '" + sc.name + "' activated");
         }
       } else {
-        if (old_idx < 0)
-          RCLCPP_WARN(get_logger(),
+        if (old_idx < 0) {
+          RCLCPP_WARN(
+            get_logger(),
             "polka: source '%s' added but pending until sources.%s.topic is set",
             sc.name.c_str(), sc.name.c_str());
+        }
       }
       slot.drift.set_config(drift_config(sc, new_config.diagnostics));
       slot.created_at = std::chrono::steady_clock::now();
@@ -401,8 +425,8 @@ void PolkaNode::rebuild_sources(
 
   for (const auto & old_sc : old_config.sources) {
     bool kept = false;
-    for (const auto & sc : new_config.sources)
-      if (sc.name == old_sc.name) {kept = true; break;}
+    for (const auto & sc : new_config.sources) {
+      if (sc.name == old_sc.name) {kept = true; break;}}
     if (!kept) {
       RCLCPP_INFO(get_logger(), "polka: source '%s' removed", old_sc.name.c_str());
       changes.emplace_back("source '" + old_sc.name + "' removed");
@@ -420,8 +444,9 @@ void PolkaNode::configure_diagnostics(const DiagnosticsConfig & d)
     diag_reporter_.reset();
     return;
   }
-  if (!diag_reporter_)
+  if (!diag_reporter_) {
     diag_reporter_ = std::make_unique<DiagnosticsReporter>(this);
+  }
   auto period = std::chrono::duration<double>(d.publish_period_sec);
   diag_timer_ = create_wall_timer(
     std::chrono::duration_cast<std::chrono::nanoseconds>(period),
@@ -442,7 +467,8 @@ void PolkaNode::diag_callback()
 
   // First pass: sample every live source, collect fresh stamps for the peer
   // median (needs >= 2 fresh sources to mean anything).
-  struct Snapshot {
+  struct Snapshot
+  {
     StatWindow::Rates rates;
     bool received = false;
     bool stale = false;
@@ -452,14 +478,14 @@ void PolkaNode::diag_callback()
   std::vector<double> fresh_stamps;
   for (size_t i = 0; i < sources_.size(); ++i) {
     auto & slot = sources_[i];
-    if (!slot.adapter) continue;
+    if (!slot.adapter) {continue;}
     auto & snap = snaps[i];
     snap.rates = slot.stats_window.update(slot.adapter->stats(), now_steady_sec);
     snap.received = slot.adapter->received();
     snap.stale = slot.adapter->is_stale(config_.source_timeout, now);
     if (snap.received) {
       snap.stamp_sec = slot.adapter->last_stamp().seconds();
-      if (!snap.stale) fresh_stamps.push_back(snap.stamp_sec);
+      if (!snap.stale) {fresh_stamps.push_back(snap.stamp_sec);}
     }
   }
 
@@ -504,7 +530,7 @@ void PolkaNode::diag_callback()
     r.receive_overdue = !snap.received &&
       std::chrono::duration<double>(steady_now - slot.created_at).count() > receive_grace_sec;
     r.stale = snap.received && snap.stale;
-    if (snap.received && !snap.stale) ++fresh_count;
+    if (snap.received && !snap.stale) {++fresh_count;}
 
     r.rates = snap.rates;
     if (merge_engine_->is_gpu() && r.rates.valid) {
@@ -530,22 +556,30 @@ void PolkaNode::diag_callback()
     const auto & ds = slot.drift.update(din);
     r.drift = ds;
 
-    if (ds.timing_raised)
-      RCLCPP_WARN(get_logger(),
+    if (ds.timing_raised) {
+      RCLCPP_WARN(
+        get_logger(),
         "polka: source '%s' timing drift: offset %+.3f s from peer median (threshold %.3f s)",
         sc.name.c_str(), ds.offset_ewma_sec, config_.diagnostics.timing_threshold_sec);
-    if (ds.timing_cleared)
-      RCLCPP_INFO(get_logger(),
+    }
+    if (ds.timing_cleared) {
+      RCLCPP_INFO(
+        get_logger(),
         "polka: source '%s' timing drift cleared (offset %+.3f s)",
         sc.name.c_str(), ds.offset_ewma_sec);
-    if (ds.rate_raised)
-      RCLCPP_WARN(get_logger(),
+    }
+    if (ds.rate_raised) {
+      RCLCPP_WARN(
+        get_logger(),
         "polka: source '%s' rate drift: %.1f Hz < expected %.1f Hz",
         sc.name.c_str(), snap.rates.msg_hz, ds.expected_rate);
-    if (ds.rate_cleared)
-      RCLCPP_INFO(get_logger(),
+    }
+    if (ds.rate_cleared) {
+      RCLCPP_INFO(
+        get_logger(),
         "polka: source '%s' rate drift cleared (%.1f Hz)",
         sc.name.c_str(), snap.rates.msg_hz);
+    }
 
     reports.push_back(std::move(r));
   }
@@ -568,8 +602,8 @@ void PolkaNode::diag_callback()
   nr.engine = out.engine;
   nr.sources_total = sources_.size();
   nr.sources_fresh = fresh_count;
-  for (const auto & slot : sources_)
-    if (!slot.adapter) ++nr.sources_pending;
+  for (const auto & slot : sources_) {
+    if (!slot.adapter) {++nr.sources_pending;}}
   nr.output_rate_hz = config_.output_rate;
   nr.uptime_sec = std::chrono::duration<double>(steady_now - start_steady_).count();
   nr.reconfig_count = reconfig_count_;
@@ -591,18 +625,18 @@ void PolkaNode::diag_callback()
 
 void PolkaNode::diagnose_clock_health(const rclcpp::Time & now)
 {
-  if (clock_diagnosed_) return;
+  if (clock_diagnosed_) {return;}
 
   // Newest sensor stamp across sources that have actually received data. Without any
   // data there is nothing to compare the clock against, so we can't judge yet.
   rclcpp::Time newest;
   bool any = false;
   for (const auto & slot : sources_) {
-    if (!slot.adapter || !slot.adapter->received()) continue;
+    if (!slot.adapter || !slot.adapter->received()) {continue;}
     auto stamp = slot.adapter->last_stamp();
     if (!any || stamp > newest) {newest = stamp; any = true;}
   }
-  if (!any) return;
+  if (!any) {return;}
 
   const double dt = (now - newest).seconds();
   const bool sim = this->get_parameter("use_sim_time").as_bool();
@@ -610,18 +644,20 @@ void PolkaNode::diagnose_clock_health(const rclcpp::Time & now)
   // Allow normal jitter (and the correct --clock case): only react when the clock and
   // the data disagree by several staleness windows.
   const double mismatch = std::max(2.0, config_.source_timeout * 4.0);
-  if (std::fabs(dt) < mismatch) return;
+  if (std::fabs(dt) < mismatch) {return;}
 
   if (sim && count_publishers("/clock") == 0) {
     // Sim time requested but nothing drives /clock, so the clock is frozen near zero.
-    RCLCPP_WARN(get_logger(),
+    RCLCPP_WARN(
+      get_logger(),
       "polka: use_sim_time=true but no publisher on /clock was found — the simulated "
       "clock is not advancing, so timestamp/staleness checks are unreliable. If you are "
       "replaying a rosbag, play it with the --clock flag: ros2 bag play <bag> --clock");
     clock_diagnosed_ = true;
   } else if (!sim && dt > mismatch) {
     // Wall clock vs historical bag stamps: every source will be dropped as stale.
-    RCLCPP_WARN(get_logger(),
+    RCLCPP_WARN(
+      get_logger(),
       "polka: sensor timestamps are %.1f s behind the system clock. This looks like "
       "rosbag replay without simulated time; all sources will be dropped as stale and "
       "no merged cloud will be published. Set use_sim_time:=true and replay with the "
@@ -632,12 +668,33 @@ void PolkaNode::diagnose_clock_health(const rclcpp::Time & now)
   // leave clock_diagnosed_ unset and re-evaluate on the next tick — no false alarm.
 }
 
+namespace
+{
+constexpr uint64_t kMergePerfLogInterval = 50;
+}
+
+void PolkaNode::log_merge_perf(double us, const char * engine_label)
+{
+  merge_total_us_ += us;
+  merge_max_us_ = std::max(merge_max_us_, us);
+  if (++merge_calls_ % kMergePerfLogInterval == 0) {
+    RCLCPP_INFO(
+      get_logger(),
+      "polka: perf merge [%s]: mean=%.3fms max=%.3fms (over %zu calls)",
+      engine_label, merge_total_us_ / kMergePerfLogInterval / 1000.0,
+      merge_max_us_ / 1000.0, static_cast<size_t>(kMergePerfLogInterval));
+    merge_total_us_ = 0.0;
+    merge_max_us_ = 0.0;
+  }
+}
+
 void PolkaNode::output_callback()
 {
   auto now = this->now();
   diagnose_clock_health(now);
 
-  struct SourceData {
+  struct SourceData
+  {
     CloudT::ConstPtr cloud;
     Eigen::Isometry3d transform;
     FilterParams filter_params;
@@ -646,13 +703,14 @@ void PolkaNode::output_callback()
   std::vector<SourceData> source_data;
 
   for (auto & slot : sources_) {
-    if (!slot.adapter) continue;  // pending source
+    if (!slot.adapter) {continue;}  // pending source
     auto & src = *slot.adapter;
     auto cloud = src.get_latest();
-    if (!cloud || cloud->empty()) continue;
+    if (!cloud || cloud->empty()) {continue;}
 
     if (src.is_stale(config_.source_timeout, now)) {
-      RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), kLogThrottleNormalMs,
+      RCLCPP_WARN_THROTTLE(
+        get_logger(), *get_clock(), kLogThrottleNormalMs,
         "polka: source '%s' is stale", src.name().c_str());
       continue;
     }
@@ -664,7 +722,8 @@ void PolkaNode::output_callback()
       transform = tf2::transformToEigen(tf_msg.transform);
       slot.last_good_transform = transform;
     } catch (const tf2::TransformException & ex) {
-      RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), kLogThrottleNormalMs,
+      RCLCPP_WARN_THROTTLE(
+        get_logger(), *get_clock(), kLogThrottleNormalMs,
         "polka: TF failed for '%s': %s — using last known good transform",
         src.name().c_str(), ex.what());
       transform = slot.last_good_transform;
@@ -678,7 +737,7 @@ void PolkaNode::output_callback()
     // nothing rather than re-publishing the last cloud with its original stamp: a
     // duplicate header.stamp hands downstream SLAM (e.g. GLIM) two scans with zero
     // IMU samples between them and stalls odometry. A genuine gap is safe to skip.
-    if (config_.suppress_duplicate_timestamps) return;
+    if (config_.suppress_duplicate_timestamps) {return;}
     std::lock_guard<std::mutex> lock(last_data_mutex_);
     if (last_cloud_ && !last_cloud_->empty()) {
       if (cloud_pub_) {
@@ -691,9 +750,9 @@ void PolkaNode::output_callback()
         mark_published();
       }
       if (scan_pub_) {
-        auto scan = last_scan_ranges_.empty()
-          ? scan_builder_.from_cloud(last_cloud_, last_cloud_stamp_)
-          : scan_builder_.from_ranges(last_scan_ranges_, last_cloud_stamp_);
+        auto scan = last_scan_ranges_.empty() ?
+          scan_builder_.from_cloud(last_cloud_, last_cloud_stamp_) :
+          scan_builder_.from_ranges(last_scan_ranges_, last_cloud_stamp_);
         scan_out_counters_.record(
           4 * (scan.ranges.size() + scan.intensities.size()) + 60,
           scan.ranges.size(), scan.ranges.size());
@@ -706,15 +765,18 @@ void PolkaNode::output_callback()
 
   std::vector<rclcpp::Time> stamps;
   stamps.reserve(source_data.size());
-  for (const auto & sd : source_data)
+  for (const auto & sd : source_data) {
     stamps.push_back(sd.stamp);
+  }
 
   if (stamps.size() > 1) {
     auto [mn, mx] = std::minmax_element(stamps.begin(), stamps.end());
     double spread = (*mx - *mn).seconds();
-    if (spread > config_.max_source_spread_warn)
-      RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), kLogThrottleNormalMs,
+    if (spread > config_.max_source_spread_warn) {
+      RCLCPP_WARN_THROTTLE(
+        get_logger(), *get_clock(), kLogThrottleNormalMs,
         "polka: sync gap %6.3f s > %6.3f s", spread, config_.max_source_spread_warn);
+    }
   }
 
   auto output_stamp = compute_output_stamp(stamps);
@@ -725,7 +787,7 @@ void PolkaNode::output_callback()
   // header.stamp and no IMU between them. Skip until the stamp actually moves.
   if (config_.suppress_duplicate_timestamps) {
     std::lock_guard<std::mutex> lock(last_data_mutex_);
-    if (last_cloud_ && output_stamp == last_cloud_stamp_) return;
+    if (last_cloud_ && output_stamp == last_cloud_stamp_) {return;}
   }
 
   bool do_compensate = false;
@@ -759,14 +821,20 @@ void PolkaNode::output_callback()
   if (merge_engine_->is_gpu()) {
     auto pcfg = output_pipeline_.to_pipeline_config(
       scan_pub_ != nullptr, config_.scan_output.flatten);
+    auto merge_t0 = std::chrono::steady_clock::now();
     auto result = merge_engine_->merge_pipeline(inputs, pcfg);
-    if (!result.cloud || result.cloud->empty()) return;
+    log_merge_perf(
+      std::chrono::duration<double, std::micro>(
+        std::chrono::steady_clock::now() - merge_t0).count(), "CUDA");
+    if (!result.cloud || result.cloud->empty()) {return;}
 
     last_points_out_ = static_cast<int64_t>(result.cloud->size());
     if (cloud_pub_) {
       if (config_.point_timestamps.enabled &&
-          config_.point_timestamps.mode == PerPointTimeMode::OFFSET)
+        config_.point_timestamps.mode == PerPointTimeMode::OFFSET)
+      {
         rebase_point_time(*result.cloud, output_stamp);
+      }
       auto msg = to_cloud_msg(*result.cloud);
       msg.header.frame_id = config_.output_frame_id;
       msg.header.stamp = output_stamp;
@@ -779,9 +847,9 @@ void PolkaNode::output_callback()
       last_cloud_stamp_ = output_stamp;
     }
     if (scan_pub_) {
-      auto scan = result.scan_ranges.empty()
-        ? scan_builder_.from_cloud(result.cloud, output_stamp)
-        : scan_builder_.from_ranges(result.scan_ranges, output_stamp);
+      auto scan = result.scan_ranges.empty() ?
+        scan_builder_.from_cloud(result.cloud, output_stamp) :
+        scan_builder_.from_ranges(result.scan_ranges, output_stamp);
       scan_out_counters_.record(
         4 * (scan.ranges.size() + scan.intensities.size()) + 60,
         scan.ranges.size(), scan.ranges.size());
@@ -791,21 +859,29 @@ void PolkaNode::output_callback()
       last_scan_ranges_ = result.scan_ranges;
     }
   } else {
+    auto merge_t0 = std::chrono::steady_clock::now();
     auto merged = merge_engine_->merge(inputs);
-    if (!merged || merged->empty()) return;
+    log_merge_perf(
+      std::chrono::duration<double, std::micro>(
+        std::chrono::steady_clock::now() - merge_t0).count(), "CPU");
+    if (!merged || merged->empty()) {return;}
 
-    if (config_.point_timestamps.enabled && config_.cloud_output.voxel.enabled)
-      RCLCPP_WARN_ONCE(get_logger(),
+    if (config_.point_timestamps.enabled && config_.cloud_output.voxel.enabled) {
+      RCLCPP_WARN_ONCE(
+        get_logger(),
         "polka: CPU voxel downsampling reduces per-point 'time' precision to float; "
         "use enable_gpu for exact per-point time");
+    }
 
     output_pipeline_.process(*merged, config_.output_frame_id);
     last_points_out_ = static_cast<int64_t>(merged->size());
 
     if (cloud_pub_) {
       if (config_.point_timestamps.enabled &&
-          config_.point_timestamps.mode == PerPointTimeMode::OFFSET)
+        config_.point_timestamps.mode == PerPointTimeMode::OFFSET)
+      {
         rebase_point_time(*merged, output_stamp);
+      }
       auto msg = to_cloud_msg(*merged);
       msg.header.frame_id = config_.output_frame_id;
       msg.header.stamp = output_stamp;
@@ -831,7 +907,7 @@ void PolkaNode::output_callback()
 
 rclcpp::Time PolkaNode::compute_output_stamp(const std::vector<rclcpp::Time> & stamps)
 {
-  if (stamps.empty()) return this->now();
+  if (stamps.empty()) {return this->now();}
   switch (config_.timestamp_strategy) {
     case TimestampStrategy::EARLIEST:
       return *std::min_element(stamps.begin(), stamps.end());
@@ -840,10 +916,12 @@ rclcpp::Time PolkaNode::compute_output_stamp(const std::vector<rclcpp::Time> & s
     case TimestampStrategy::LOCAL:
       return this->now();
     case TimestampStrategy::AVERAGE: {
-      double sum = 0.0;
-      for (const auto & s : stamps) sum += s.seconds();
-      return rclcpp::Time(static_cast<int64_t>((sum / stamps.size()) * 1e9));
-    }
+        double sum = 0.0;
+        for (const auto & s : stamps) {
+          sum += s.seconds();
+        }
+        return rclcpp::Time(static_cast<int64_t>((sum / stamps.size()) * 1e9));
+      }
     default:
       return this->now();
   }
@@ -855,8 +933,9 @@ void PolkaNode::rebase_point_time(CloudT & cloud, const rclcpp::Time & stamp)
   // a per-point offset relative to the cloud header. Subtracting in double keeps
   // ~sub-microsecond precision even though the absolute values are ~1.7e9.
   const double base = stamp.seconds();
-  for (auto & p : cloud)
+  for (auto & p : cloud) {
     p.time -= base;
+  }
 }
 
 sensor_msgs::msg::PointCloud2 PolkaNode::to_cloud_msg(const CloudT & cloud) const
@@ -898,7 +977,8 @@ void PolkaNode::log_startup_banner() const
 
   if (config_.diagnostics.enabled) {
     char diag_buf[48];
-    std::snprintf(diag_buf, sizeof(diag_buf), "on (/diagnostics @ %.1f s)",
+    std::snprintf(
+      diag_buf, sizeof(diag_buf), "on (/diagnostics @ %.1f s)",
       config_.diagnostics.publish_period_sec);
     os << "polka:   diagnostics   : " << diag_buf << '\n';
   } else {
@@ -911,8 +991,8 @@ void PolkaNode::log_startup_banner() const
       (sc.type == SourceType::POINTCLOUD2) ? "pointcloud2" : "laserscan  ";
     const auto & fp = sc.filter_params;
     int nfilters = (fp.range_filter_enabled ? 1 : 0) +
-                   (fp.angular_filter_enabled ? 1 : 0) +
-                   (fp.box_filter_enabled ? 1 : 0);
+      (fp.angular_filter_enabled ? 1 : 0) +
+      (fp.box_filter_enabled ? 1 : 0);
     os << "polka:     " << sc.name
        << "  " << type_str
        << "  '" << sc.topic << "'"

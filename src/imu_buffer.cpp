@@ -13,11 +13,15 @@
 // limitations under the License.
 
 #include "polka/input/imu_buffer.hpp"
-#include "polka/util/log_format.hpp"
+
 #include <Eigen/Geometry>
+
 #include <cmath>
 
-namespace polka {
+#include "polka/util/log_format.hpp"
+
+namespace polka
+{
 
 ImuBuffer::ImuBuffer(rclcpp::Node * node, const std::string & topic, int buffer_size)
 : topic_(topic), max_size_(buffer_size), logger_(node->get_logger()), clock_(node->get_clock())
@@ -25,7 +29,8 @@ ImuBuffer::ImuBuffer(rclcpp::Node * node, const std::string & topic, int buffer_
   sub_ = node->create_subscription<sensor_msgs::msg::Imu>(
     topic, rclcpp::SensorDataQoS(),
     std::bind(&ImuBuffer::callback, this, std::placeholders::_1));
-  RCLCPP_INFO(logger_, "polka: IMU buffer subscribing to '%s' (capacity %d)",
+  RCLCPP_INFO(
+    logger_, "polka: IMU buffer subscribing to '%s' (capacity %d)",
     topic.c_str(), buffer_size);
 }
 
@@ -45,8 +50,10 @@ void ImuBuffer::callback(sensor_msgs::msg::Imu::ConstSharedPtr msg)
   const auto & a = msg->linear_acceleration;
   const auto & w = msg->angular_velocity;
   if (!std::isfinite(a.x) || !std::isfinite(a.y) || !std::isfinite(a.z) ||
-      !std::isfinite(w.x) || !std::isfinite(w.y) || !std::isfinite(w.z)) {
-    RCLCPP_WARN_THROTTLE(logger_, *clock_, kLogThrottleFastMs,
+    !std::isfinite(w.x) || !std::isfinite(w.y) || !std::isfinite(w.z))
+  {
+    RCLCPP_WARN_THROTTLE(
+      logger_, *clock_, kLogThrottleFastMs,
       "polka: IMU buffer received non-finite values, ignoring");
     return;
   }
@@ -63,14 +70,23 @@ void ImuBuffer::callback(sensor_msgs::msg::Imu::ConstSharedPtr msg)
       accel -= g_imu;
     } else {
       accel.setZero();
-      RCLCPP_WARN_THROTTLE(logger_, *clock_, kLogThrottleNormalMs,
+      RCLCPP_WARN_THROTTLE(
+        logger_, *clock_, kLogThrottleNormalMs,
         "polka: IMU has degenerate orientation quaternion, translation deskew disabled");
     }
   } else {
-    accel.setZero();
-    RCLCPP_WARN_ONCE(logger_,
-      "polka: IMU has no orientation — cannot subtract gravity, "
-      "translation deskew disabled (rotation-only)");
+    // 无 orientation：用静止比力的 EMA 估计体坐标系重力（静止时 accel ≈ +g_body）
+    constexpr double kGravityEmaAlpha = 0.02;
+    if (!g_body_initialized_) {
+      g_body_ema_ = accel;
+      g_body_initialized_ = true;
+    } else {
+      g_body_ema_ = (1.0 - kGravityEmaAlpha) * g_body_ema_ + kGravityEmaAlpha * accel;
+    }
+    accel -= g_body_ema_;
+    RCLCPP_INFO_ONCE(
+      logger_,
+      "polka: IMU has no orientation, estimating body-frame gravity via EMA");
   }
 
   ImuSample sample;
@@ -81,8 +97,9 @@ void ImuBuffer::callback(sensor_msgs::msg::Imu::ConstSharedPtr msg)
   {
     std::lock_guard<std::mutex> lock(mutex_);
     buffer_.push_back(sample);
-    while (static_cast<int>(buffer_.size()) > max_size_)
+    while (static_cast<int>(buffer_.size()) > max_size_) {
       buffer_.pop_front();
+    }
     last_stamp_ = sample.stamp;
   }
   msg_count_.fetch_add(1, std::memory_order_relaxed);

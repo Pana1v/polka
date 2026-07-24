@@ -17,7 +17,8 @@
 
 #include <vector>
 
-namespace polka {
+namespace polka
+{
 
 // Per-source drift detector, fed once per diagnostics tick. ROS-free so the
 // raise/clear behavior is unit-testable in isolation.
@@ -27,9 +28,11 @@ namespace polka {
 // a condition) and clears only after 'min_ticks' consecutive ticks below a
 // clear threshold set at 80% of the raise threshold, so a value hovering at
 // the boundary cannot flap the flag.
-class DriftTracker {
+class DriftTracker
+{
 public:
-  struct Config {
+  struct Config
+  {
     // Timing drift: EWMA of (source stamp - peer median stamp).
     double timing_threshold_sec = 0.1;
     double timing_ewma_alpha = 0.2;
@@ -41,7 +44,8 @@ public:
     double expected_rate = 0.0;       // Hz; 0 = auto-baseline from observed rates
   };
 
-  struct Input {
+  struct Input
+  {
     bool has_offset = false;        // false when fewer than 2 fresh peers exist
     double stamp_offset_sec = 0.0;  // this source's stamp minus the peer median
     bool has_rate = false;          // false when the rate window is not yet valid
@@ -49,7 +53,8 @@ public:
     double tick_period_sec = 1.0;   // advances the auto-baseline window
   };
 
-  struct Status {
+  struct Status
+  {
     bool timing_drift = false;
     bool rate_drift = false;
     bool ewma_valid = false;
@@ -63,7 +68,7 @@ public:
 
     const char * expected_rate_source() const
     {
-      if (expected_rate <= 0.0) return "none";
+      if (expected_rate <= 0.0) {return "none";}
       return expected_rate_from_param ? "param" : "auto";
     }
     bool expected_rate_from_param = false;
@@ -78,7 +83,7 @@ public:
   void set_config(const Config & cfg);
 
   const Status & update(const Input & in);
-  const Status & status() const { return status_; }
+  const Status & status() const {return status_;}
 
 private:
   void update_timing(const Input & in);

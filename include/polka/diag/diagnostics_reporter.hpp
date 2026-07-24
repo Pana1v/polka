@@ -15,21 +15,22 @@
 #ifndef POLKA__DIAG__DIAGNOSTICS_REPORTER_HPP_
 #define POLKA__DIAG__DIAGNOSTICS_REPORTER_HPP_
 
-#include "polka/diag/stat_counters.hpp"
-#include "polka/diag/drift_tracker.hpp"
-
-#include <rclcpp/rclcpp.hpp>
-#include <diagnostic_msgs/msg/diagnostic_array.hpp>
-
 #include <string>
 #include <vector>
 
-namespace polka {
+#include "polka/diag/stat_counters.hpp"
+#include "polka/diag/drift_tracker.hpp"
+#include <rclcpp/rclcpp.hpp>
+#include <diagnostic_msgs/msg/diagnostic_array.hpp>
+
+namespace polka
+{
 
 // Plain snapshots computed by PolkaNode's diagnostics tick. The reporter only
 // formats and publishes them, so the node code stays free of key/value noise.
 
-struct SourceReport {
+struct SourceReport
+{
   std::string name;
   std::string topic;
   std::string type_str;   // "pointcloud2" | "laserscan"
@@ -54,7 +55,8 @@ struct SourceReport {
   bool deskew_active = false;
 };
 
-struct OutputReport {
+struct OutputReport
+{
   std::string engine;  // "CUDA" | "CPU"
   std::string cloud_topic;  // empty when the cloud output is disabled
   std::string scan_topic;   // empty when the scan output is disabled
@@ -66,7 +68,8 @@ struct OutputReport {
   bool publish_overdue = false;  // sources fresh but output silent
 };
 
-struct ImuReport {
+struct ImuReport
+{
   bool enabled = false;   // motion_compensation on with a resolved imu_topic
   std::string topic;
   bool valid = false;     // has received at least one usable sample
@@ -74,7 +77,8 @@ struct ImuReport {
   double msg_age_sec = -1.0;  // node now - last stamp; <0 = unknown
 };
 
-struct NodeReport {
+struct NodeReport
+{
   std::string engine;
   size_t sources_total = 0;
   size_t sources_fresh = 0;
@@ -84,7 +88,8 @@ struct NodeReport {
   uint64_t reconfig_count = 0;
 };
 
-class DiagnosticsReporter {
+class DiagnosticsReporter
+{
 public:
   explicit DiagnosticsReporter(rclcpp::Node * node);
 

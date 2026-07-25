@@ -20,18 +20,30 @@ namespace polka
 
 AngularFilter::AngularFilter(
   const std::vector<std::pair<double, double>> & ranges_deg, bool invert)
-: ranges_deg_(ranges_deg), invert_(invert)
+: invert_(invert)
 {
+  bounds_.reserve(ranges_deg.size());
+  for (const auto & r : ranges_deg) {
+    double lo_rad = r.first * M_PI / 180.0;
+    double hi_rad = r.second * M_PI / 180.0;
+    double span = (r.first <= r.second) ? (r.second - r.first) : (360.0 - r.first + r.second);
+    bounds_.push_back(
+      {
+        static_cast<float>(std::cos(lo_rad)), static_cast<float>(std::sin(lo_rad)),
+        static_cast<float>(std::cos(hi_rad)), static_cast<float>(std::sin(hi_rad)),
+        span > 180.0
+      });
+  }
 }
 
-bool AngularFilter::in_ranges(double angle_deg) const
+bool AngularFilter::in_ranges(float x, float y) const
 {
-  for (const auto & r : ranges_deg_) {
-    if (r.first <= r.second) {
-      if (angle_deg >= r.first && angle_deg <= r.second) {return true;}
-    } else {
-      if (angle_deg >= r.first || angle_deg <= r.second) {return true;}
-    }
+  for (const auto & b : bounds_) {
+    float cross_lo = b.lo_x * y - b.lo_y * x;
+    float cross_hi = b.hi_x * y - b.hi_y * x;
+    bool inside = b.wide ? (cross_lo >= 0.0f || cross_hi <= 0.0f) :
+      (cross_lo >= 0.0f && cross_hi <= 0.0f);
+    if (inside) {return true;}
   }
   return false;
 }
@@ -41,11 +53,7 @@ void AngularFilter::apply(CloudT & cloud, const std::string & /*frame_id*/)
   size_t j = 0;
   for (size_t i = 0; i < cloud.size(); ++i) {
     const auto & p = cloud[i];
-    double angle_rad = std::atan2(static_cast<double>(p.y), static_cast<double>(p.x));
-    double angle_deg = angle_rad * 180.0 / M_PI;
-    if (angle_deg < 0.0) {angle_deg += 360.0;}
-
-    bool match = in_ranges(angle_deg);
+    bool match = in_ranges(p.x, p.y);
     bool keep = invert_ ? !match : match;
     if (keep) {
       cloud[j++] = p;

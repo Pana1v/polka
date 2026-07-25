@@ -31,9 +31,14 @@ public:
   void apply(CloudT & cloud, const std::string & frame_id) override;
 
 private:
-  std::vector<std::pair<double, double>> ranges_deg_;
+  // Precomputed bound vectors for a cross-product half-plane test, one per range:
+  // (cos(lo), sin(lo), cos(hi), sin(hi)). Mirrors cuda_merge_engine.cu's
+  // pass_angular(), which avoids atan2f per point; ported here so the CPU path
+  // gets the same win (measured ~3x: PERF_AUDIT.md finding #4).
+  struct Bound { float lo_x, lo_y, hi_x, hi_y; bool wide; };
+  std::vector<Bound> bounds_;
   bool invert_;
-  bool in_ranges(double angle_deg) const;
+  bool in_ranges(float x, float y) const;
 };
 
 }  // namespace polka

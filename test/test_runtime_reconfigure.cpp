@@ -78,6 +78,8 @@ protected:
         rclcpp::Parameter("output_rate", 20.0),
         // Generous so a slow CI machine cannot stale-out mid-test.
         rclcpp::Parameter("source_timeout", 5.0),
+        // Must be >= source_timeout; keep it above the generous timeout above.
+        rclcpp::Parameter("source_stale_reuse_window", 6.0),
       });
     node_ = std::make_shared<PolkaNode>(opts);
     helper_ = std::make_shared<rclcpp::Node>("helper");

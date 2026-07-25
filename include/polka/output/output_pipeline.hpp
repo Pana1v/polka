@@ -36,8 +36,10 @@ public:
   /// Rebuild filter chain after a reconfigure (same config, new filter objects).
   void rebuild_filters();
 
-  /// Run CPU pipeline in-place on a merged cloud.
-  void process(CloudT & cloud, const std::string & frame_id) const;
+  /// Run CPU pipeline in-place on a merged cloud. Takes the shared_ptr the caller
+  /// already owns (not a bare reference) so pcl::VoxelGrid::setInputCloud() can use
+  /// it directly instead of forcing a full deep copy via cloud->makeShared().
+  void process(CloudT::Ptr cloud, const std::string & frame_id) const;
 
   /// Build PipelineConfig for the GPU path (merge_pipeline).
   PipelineConfig to_pipeline_config(bool scan_enabled, const FlattenParams & flatten) const;

@@ -370,8 +370,8 @@ def _lag(value):
 
 
 def _cap_mark(on):
-    """Capability-matrix cell: a check for enabled, a dim dot for off."""
-    return '✓' if on else '·'
+    """Capability-matrix cell: colored box for enabled, space for off."""
+    return '█' if on else ' '
 
 
 _SOURCE_PALETTE = (5, 6, 7)  # curses color pair ids, assigned to sources as seen
@@ -526,8 +526,14 @@ class Dashboard:
                 break
             attr = self._level_attr(e['level'])
             name = e['name']
-            self._put(stdscr, row, x0, ' %s %-8s %-6s %-30s f:%s' % (
-                '●', name[:8], e['type'], e['topic'][:30], e['frame']), attr, x1)
+            # Status box: colored square showing health
+            status_char = '█'
+            try:
+                stdscr.addstr(row, x0 + 1, status_char, attr)
+            except curses.error:
+                pass
+            self._put(stdscr, row, x0 + 3, '%-8s %-6s %-30s f:%s' % (
+                name[:8], e['type'], e['topic'][:30], e['frame']), attr, x1)
             row += 1
             l2 = '   rate %5s Hz   bw %10s   lag %6s   caps %s' % (
                 _num(e['rate']), human_bw(e['bw']), _lag(e['age']), e['caps'])

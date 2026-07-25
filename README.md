@@ -69,12 +69,12 @@ Each clip runs polka with a different config on the [TIERS multi-LiDAR dataset](
 ## Performance
 
 <p align="center">
-  <img src="doc/images/perf_summary.svg" alt="Polka 0.5.0 before and after performance summary" width="840"/>
+  <img src="doc/images/perf_summary.svg" alt="Polka 0.5.0 before and after performance summary" width="620"/>
 </p>
 
 **CUDA.** The GPU merge engine wins on heavy pipelines by fusing transform, filter, voxel, and scan flatten into a single pass over the points. On a filterless merge the CPU stays competitive, because kernel dispatch and host to device transfer overhead dominate when there is little per-point work to hide them behind. Build with `-DWITH_CUDA=ON` (it falls back to CPU automatically); it is not universally faster.
 
-**Bandwidth.** polka fans N sensor streams into one output topic, and voxel downsampling drops roughly 14x the points (69k to 5k in the demo clip), so every downstream node subscribes once to a lighter cloud instead of to each raw sensor.
+**Bandwidth.** polka fans N sensor streams into one output topic, so every downstream node subscribes once instead of to each raw sensor. Voxel downsampling can thin that cloud further, a tradeoff the user sets through `leaf_size`: at the leaf size used in the demo clip it drops 69k points to 5k (about 14x), which is an example of the ratio, not a fixed figure or a 0.5.0 speedup.
 
 See [Performance notes](doc/PERFORMANCE.md) for measurement context, the per number sources, and the CPU to CUDA crossover.
 

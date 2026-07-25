@@ -14,7 +14,8 @@ import pathlib
 
 import matplotlib
 matplotlib.use('Agg')
-matplotlib.rcParams['svg.fonttype'] = 'path'  # embed glyphs as vectors so it renders without the font installed
+# embed glyphs as vector paths so the SVG renders without the font installed
+matplotlib.rcParams['svg.fonttype'] = 'path'
 import matplotlib.pyplot as plt  # noqa: E402
 
 # Light panel + dark text so the SVG survives GitHub light and dark themes.
@@ -25,16 +26,18 @@ GRID = '#d3d9e0'
 BEFORE = '#94a3b8'   # slate: the old path
 AFTER = '#2a9d8f'    # teal (matches the PCL badge): the optimized path
 
+# The two genuine 0.5.0 speedups: the same computation, made faster by a code
+# change. Voxel downsampling is deliberately excluded; its point-count ratio is
+# a user-set leaf_size tradeoff, not a code speedup, so it does not belong here.
 # (title, unit, before, after, before_label, after_label, callout)
 METRICS = [
     ('Deskew stage', 'ms / source', 9.8, 1.6, '9.8', '1.6', '6.2x faster'),
     ('CPU angular filter', 'ms / tick @259k pts', 10.47, 3.55, '10.47', '3.55', '3x faster'),
-    ('Voxel downsample', 'thousands of points', 69.0, 5.0, '69k', '5k', '~14x fewer'),
 ]
 
 
 def render(out_paths):
-    fig, axes = plt.subplots(1, 3, figsize=(10.8, 3.8), facecolor=PANEL)
+    fig, axes = plt.subplots(1, len(METRICS), figsize=(7.6, 3.8), facecolor=PANEL)
     fig.suptitle('Polka 0.5.0 measured improvements (before to after)',
                  color=INK, fontsize=14, family='monospace', weight='bold', y=0.98)
 
@@ -72,7 +75,7 @@ def render(out_paths):
              fontsize=9, family='monospace')
     fig.text(0.99, 0.02, 'polka', color=MUTED, fontsize=9, family='monospace',
              ha='right', weight='bold')
-    fig.subplots_adjust(left=0.07, right=0.985, top=0.82, bottom=0.14, wspace=0.42)
+    fig.subplots_adjust(left=0.1, right=0.97, top=0.82, bottom=0.14, wspace=0.36)
 
     for p in out_paths:
         fig.savefig(p, facecolor=PANEL)

@@ -443,7 +443,7 @@ SelfFilterConfig ConfigLoader::load_self_filter_config(
   return sf;
 }
 
-void ConfigLoader::validate(const MergeConfig & config, bool allow_pending)
+void ConfigLoader::validate(MergeConfig & config, bool allow_pending)
 {
   if (config.sources.empty()) {
     throw std::runtime_error("polka: source_names is empty");
@@ -459,8 +459,12 @@ void ConfigLoader::validate(const MergeConfig & config, bool allow_pending)
     throw std::runtime_error("polka: source_timeout must be > 0");
   }
   if (config.source_stale_reuse_window < config.source_timeout) {
-    throw std::runtime_error(
-            "polka: source_stale_reuse_window must be >= source_timeout");
+    RCLCPP_WARN(
+      logger_,
+      "polka: source_stale_reuse_window (%.3f) < source_timeout (%.3f); "
+      "raising it to source_timeout",
+      config.source_stale_reuse_window, config.source_timeout);
+    config.source_stale_reuse_window = config.source_timeout;
   }
   if (!config.cloud_output.enabled && !config.scan_output.enabled) {
     throw std::runtime_error("polka: at least one output (cloud or scan) must be enabled");

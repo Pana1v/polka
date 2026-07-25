@@ -492,7 +492,11 @@ CloudT::Ptr CudaMergeEngine::merge(const std::vector<MergeInput> & sources)
     // construction; never write past them even if more sources show up.
     if (n > impl_->max_total_points - input_offset) {
       n = impl_->max_total_points - input_offset;
-      fprintf(stderr, "[polka] CUDA: device buffer full, truncating source to %zu points\n", n);
+      static bool warned = false;
+      if (!warned) {
+        warned = true;
+        fprintf(stderr, "[polka] CUDA: device buffer full, truncating source to %zu points\n", n);
+      }
       if (n == 0) break;
     }
 
@@ -579,7 +583,11 @@ PipelineResult CudaMergeEngine::merge_pipeline(
     // construction; never write past them even if more sources show up.
     if (n > impl_->max_total_points - total_points) {
       n = impl_->max_total_points - total_points;
-      fprintf(stderr, "[polka] CUDA: device buffer full, truncating source to %zu points\n", n);
+      static bool warned = false;
+      if (!warned) {
+        warned = true;
+        fprintf(stderr, "[polka] CUDA: device buffer full, truncating source to %zu points\n", n);
+      }
       if (n == 0) break;
     }
     src_offset[si] = total_points;

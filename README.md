@@ -68,8 +68,8 @@ Each clip runs polka with a different config on the [TIERS multi-LiDAR dataset](
 - **IMU deskewing**: per-point SE(3) motion correction, with per-point timestamp auto-detect
 - **CUDA acceleration**: optional GPU merge engine, falls back to CPU
 - **TF2 integration**: automatic lookup with last-known-good fallback
-- **Full runtime reconfiguration**: filters, outputs, deskewing, and even the source list can be changed live via `ros2 param set` — no restart (see [Runtime Reconfiguration & Diagnostics](doc/RUNTIME.md))
-- **Diagnostics, drift detection, and a terminal dashboard**: per-source rate/bandwidth/lag on `/diagnostics`, timing/rate drift flags, and an optional `polka_monitor` TUI (see [Runtime Reconfiguration & Diagnostics](doc/RUNTIME.md))
+- **Full runtime reconfiguration**: filters, outputs, deskewing, and even the source list can be changed live via `ros2 param set` — no restart
+- **Diagnostics, drift detection, and a terminal dashboard**: per-source rate/bandwidth/lag on `/diagnostics`, timing/rate drift flags, and an optional `polka_monitor` TUI
 - **Composable node**: runs standalone or loaded into a component container
 
 ## Install
@@ -102,7 +102,6 @@ Set `output_frame_id` to your base frame, list sensors under `source_names`, and
 ## Documentation
 
 - **[Configuration](doc/CONFIGURATION.md)**: every parameter, filters, IMU deskewing, rosbag playback
-- **[Runtime Reconfiguration & Diagnostics](doc/RUNTIME.md)**: live `ros2 param set` reconfiguration, `/diagnostics`, drift detection, the `polka_monitor` terminal dashboard
 - **[Pipeline and architecture](doc/PIPELINE.md)**: what polka replaces, internal stages, file layout
 - **[Maintaining distro branches](MAINTAINING.md)**: single-source-of-truth sync across the five branches
 

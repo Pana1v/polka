@@ -64,5 +64,6 @@ def generate_launch_description():
                  'exec "%s" --node polka </dev/tty >/dev/tty 2>&1' % os.path.join(
                      get_package_prefix('polka'), 'lib', 'polka', 'polka_monitor')],
             output='screen',
+            additional_env={'FORCE_COLOR': '1'},
         ),
     ])

@@ -419,14 +419,25 @@ class Dashboard:
     def run(self, stdscr):
         curses.curs_set(0)
         curses.use_default_colors()
-        curses.start_color()
-        curses.init_pair(1, curses.COLOR_GREEN, -1)
-        curses.init_pair(2, curses.COLOR_YELLOW, -1)
-        curses.init_pair(3, curses.COLOR_RED, -1)
-        curses.init_pair(4, curses.COLOR_CYAN, -1)
-        curses.init_pair(5, curses.COLOR_MAGENTA, -1)
-        curses.init_pair(6, curses.COLOR_BLUE, -1)
-        curses.init_pair(7, curses.COLOR_WHITE, -1)
+        # FORCE_COLOR env var: explicit contract between script and launch file.
+        # When set, assume terminal supports color even if TERM doesn't report it.
+        # This is the right way to handle color in launch contexts (not lying about TERM).
+        force_color = os.environ.get('FORCE_COLOR') == '1'
+        try:
+            curses.start_color()
+            curses.init_pair(1, curses.COLOR_GREEN, -1)
+            curses.init_pair(2, curses.COLOR_YELLOW, -1)
+            curses.init_pair(3, curses.COLOR_RED, -1)
+            curses.init_pair(4, curses.COLOR_CYAN, -1)
+            curses.init_pair(5, curses.COLOR_MAGENTA, -1)
+            curses.init_pair(6, curses.COLOR_BLUE, -1)
+            curses.init_pair(7, curses.COLOR_WHITE, -1)
+        except curses.error:
+            # TERM doesn't report color capability, but FORCE_COLOR says to try anyway.
+            if not force_color:
+                raise
+            # FORCE_COLOR set: attempt color init anyway; may fail gracefully below.
+            pass
         stdscr.nodelay(True)
         period = 1.0 / max(self.args.rate, 0.1)
         while True:

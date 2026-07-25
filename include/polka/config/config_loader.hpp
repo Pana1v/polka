@@ -63,7 +63,7 @@ private:
   FilterParams load_filter_params(const std::string & prefix);
   OutputQosConfig load_output_qos(const std::string & prefix);
   SelfFilterConfig load_self_filter_config(const std::string & prefix, bool declare_missing);
-  void validate(const MergeConfig & config, bool allow_pending);
+  void validate(MergeConfig & config, bool allow_pending);
 
   // overlay -> committed storage; throws if the parameter was never declared.
   rclcpp::Parameter param(const std::string & name) const;

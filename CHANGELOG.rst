@@ -9,6 +9,19 @@ Forthcoming
 * Consolidate documentation assets (docs, images, demo media) under ``doc/``.
 * Remove the superseded ``pipeline_demo.gif``.
 
+0.5.0 (2026-07-25)
+------------------
+* Add ``polka_monitor`` terminal diagnostics dashboard and ``dashboard`` launch arg.
+* Two-phase runtime reconfigure and ``/diagnostics`` stats with timing and rate drift flags.
+* CPU and CUDA merge performance optimizations, plus bounded stale-source reuse.
+* Coarse-stride SE(3) rotation interpolation for faster per-point deskew.
+* Estimate body-frame gravity via EMA when the IMU lacks orientation.
+* Detect rosbag/clock misconfiguration and expose ``use_sim_time``.
+* Per-point timestamp passthrough with a duplicate-timestamp guard.
+* Add Iron, Kilted, and Lyrical distro support with a per-distro CI build matrix.
+* Behavior change: ``suppress_duplicate_timestamps`` and ``diagnostics.enabled`` now default to true.
+* ``example_params.yaml`` slimmed to a minimal example; full reference moved to ``config/detailed_params.yaml``.
+
 0.3.0 (2026-05-28)
 ------------------
 * Add CHANGELOG.rst (REP 132) and release metadata to package.xml (website / repository / bugtracker URLs, author tag); bump version to 0.3.0.

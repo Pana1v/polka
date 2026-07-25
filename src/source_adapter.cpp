@@ -28,7 +28,6 @@ namespace polka
 
 namespace
 {
-constexpr uint64_t kPerfLogInterval = 50;
 // Rotation-only deskew fast path: exact-compute the per-point rotation every this
 // many points, linearly interpolate the rest. See deskew_cloud() for the error bound.
 constexpr size_t kDeskewInterpStride = 16;
@@ -336,22 +335,7 @@ void SourceAdapter::pc2_callback(sensor_msgs::msg::PointCloud2::ConstSharedPtr m
   if (deskew_enabled_ && has_timestamp_field_ && get_imu_) {
     auto imu = get_imu_();
     if (imu && imu->valid) {
-      auto t0 = std::chrono::steady_clock::now();
       deskew_cloud(*cloud, *msg, *imu);
-      double us = std::chrono::duration<double, std::micro>(
-        std::chrono::steady_clock::now() - t0).count();
-      deskew_total_us_ += us;
-      deskew_max_us_ = std::max(deskew_max_us_, us);
-      if (++deskew_calls_ % kPerfLogInterval == 0) {
-        RCLCPP_INFO(
-          logger_,
-          "polka: perf source '%s' deskew: mean=%.3fms max=%.3fms (n=%zu pts, over %zu calls)",
-          config_.name.c_str(), deskew_total_us_ / kPerfLogInterval / 1000.0,
-          deskew_max_us_ / 1000.0, cloud->size(),
-          static_cast<size_t>(kPerfLogInterval));
-        deskew_total_us_ = 0.0;
-        deskew_max_us_ = 0.0;
-      }
     }
   }
 

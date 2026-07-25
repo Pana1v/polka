@@ -14,22 +14,25 @@
 # limitations under the License.
 """polka_monitor - a terminal dashboard for the polka multi-LiDAR fusion node.
 
-Left pane: Braille-rendered top (x-y) and side (x-z) views of the merged
-cloud, with the merged scan overlaid on the top view. Right pane: per-source
-metrics from /diagnostics plus a live warning feed. Requires the node's
-diagnostics (on by default): ros2 param set /polka diagnostics.enabled true
+A single full-width view built from the node's /diagnostics. Per source it
+shows the active topic, publish rate, message lag, and the capabilities that
+are actually live (per-source range/angular/box filters and IMU deskew). Below
+that: the merge engine (CUDA or CPU), the output topics and rates, IMU status,
+and a feed of warning transitions. Healthy rows stay quiet; only a source that
+needs attention is colored and gets a one-line reason. No point cloud is drawn.
+
+Requires the node's diagnostics (on by default):
+  ros2 param set /polka diagnostics.enabled true
 
 Run in any terminal (locally or over SSH):  ros2 run polka polka_monitor
-Keys: q quit | f fixed/auto extent | v toggle views | p pause feed
+Keys: q quit | p pause feed
 """
 
 import argparse
 from collections import deque
 import curses
-import math
 import re
 import signal
-import struct
 import sys
 import textwrap
 import threading
@@ -42,13 +45,11 @@ from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy
 from rclpy.qos import QoSProfile
 from rclpy.qos import ReliabilityPolicy
-from rclpy.serialization import deserialize_message
-from sensor_msgs.msg import LaserScan
-from sensor_msgs.msg import PointCloud2
 
-MAX_VIZ_POINTS = 4096
 FEED_CAPACITY = 200
-LEVEL_LABEL = {0: 'OK', 1: 'WARN', 2: 'ERROR', 3: 'STALE'}
+# One-line source rows fit above this width; narrower terminals wrap each
+# source's topic and capabilities onto a dim sub-line so nothing is truncated.
+WIDE_MIN_COLS = 90
 
 # Log.WARN etc. are declared `byte` in rcl_interfaces/msg/Log, which rclpy
 # represents as a single-byte `bytes` object, not an int like the `uint8`
@@ -60,15 +61,9 @@ def parse_args():
     parser = argparse.ArgumentParser(
         description='Terminal dashboard for the polka multi-LiDAR fusion node.')
     parser.add_argument('--node', default='polka', help='polka node name (default: polka)')
-    parser.add_argument('--rate', type=float, default=4.0, help='redraws per second (default: 4.0)')
+    parser.add_argument('--rate', type=float, default=4.0,
+                        help='redraws per second (default: 4.0)')
     parser.add_argument('--diag-topic', default='/diagnostics')
-    parser.add_argument('--cloud-topic', default='',
-                        help='merged cloud topic (default: auto from diagnostics)')
-    parser.add_argument('--scan-topic', default='',
-                        help='merged scan topic (default: auto from diagnostics)')
-    parser.add_argument('--fixed-extent', type=float, default=0.0,
-                        help='fixed view half-extent in meters (0 = auto-scale)')
-    parser.add_argument('--no-viz', action='store_true', help='disable the view pane')
     return parser.parse_args()
 
 
@@ -83,11 +78,7 @@ class RosIO(Node):
 
         self.statuses = {}          # short name -> DiagnosticStatus
         self.last_diag_time = 0.0
-        self.feed = deque(maxlen=FEED_CAPACITY)   # (wall time, severity, text)
-        self.cloud_raw = None
-        self.cloud_time = 0.0
-        self.scan_raw = None
-        self.scan_time = 0.0
+        self.feed = deque(maxlen=FEED_CAPACITY)   # (wall time, severity, source, text)
         self.saw_node = False
         self._flag_state = {}       # source -> {flag: bool} for transition events
 
@@ -101,37 +92,6 @@ class RosIO(Node):
             QoSProfile(depth=200, reliability=ReliabilityPolicy.RELIABLE,
                        durability=DurabilityPolicy.VOLATILE))
 
-        self._cloud_sub = None
-        self._scan_sub = None
-        if args.cloud_topic:
-            self._subscribe_cloud(args.cloud_topic)
-        if args.scan_topic:
-            self._subscribe_scan(args.scan_topic)
-
-    def _subscribe_cloud(self, topic):
-        # raw=True delivers serialized bytes: full-rate delivery costs a
-        # memcpy, and decoding happens at most once per redraw.
-        qos = QoSProfile(depth=1, reliability=ReliabilityPolicy.BEST_EFFORT,
-                         durability=DurabilityPolicy.VOLATILE)
-        self._cloud_sub = self.create_subscription(
-            PointCloud2, topic, self._on_cloud, qos, raw=True)
-
-    def _subscribe_scan(self, topic):
-        qos = QoSProfile(depth=1, reliability=ReliabilityPolicy.BEST_EFFORT,
-                         durability=DurabilityPolicy.VOLATILE)
-        self._scan_sub = self.create_subscription(
-            LaserScan, topic, self._on_scan, qos, raw=True)
-
-    def _on_cloud(self, raw):
-        with self.lock:
-            self.cloud_raw = bytes(raw)
-            self.cloud_time = time.time()
-
-    def _on_scan(self, raw):
-        with self.lock:
-            self.scan_raw = bytes(raw)
-            self.scan_time = time.time()
-
     def _on_diag(self, msg):
         ours = {}
         for status in msg.status:
@@ -144,14 +104,6 @@ class RosIO(Node):
             self.last_diag_time = time.time()
             self._emit_transitions(ours)
             self.statuses = ours
-        if self._cloud_sub is None or self._scan_sub is None:
-            out = ours.get('output')
-            if out is not None:
-                keys = {kv.key: kv.value for kv in out.values}
-                if self._cloud_sub is None and keys.get('cloud_topic'):
-                    self._subscribe_cloud(keys['cloud_topic'])
-                if self._scan_sub is None and keys.get('scan_topic'):
-                    self._subscribe_scan(keys['scan_topic'])
 
     def _emit_transitions(self, ours):
         """Turn flag flips in per-source statuses into feed events."""
@@ -198,211 +150,121 @@ class RosIO(Node):
                 'statuses': dict(self.statuses),
                 'diag_age': diag_age,
                 'feed': list(self.feed),
-                'cloud_raw': self.cloud_raw,
-                'scan_raw': self.scan_raw,
                 'saw_node': self.saw_node,
             }
 
 
-def decode_cloud(raw, max_points=MAX_VIZ_POINTS):
-    """Deserialize once, then unpack a stride-sampled subset of x/y/z."""
-    msg = deserialize_message(raw, PointCloud2)
-    total = msg.width * msg.height
-    if total == 0 or msg.point_step == 0:
-        return []
-    offsets = {f.name: f.offset for f in msg.fields}
-    if not all(k in offsets for k in ('x', 'y', 'z')):
-        return []
-    stride = max(1, total // max_points)
-    data = msg.data
-    step = msg.point_step
-    ox, oy, oz = offsets['x'], offsets['y'], offsets['z']
-    points = []
-    unpack = struct.unpack_from
-    for i in range(0, total, stride):
-        base = i * step
-        x = unpack('<f', data, base + ox)[0]
-        y = unpack('<f', data, base + oy)[0]
-        z = unpack('<f', data, base + oz)[0]
-        if math.isfinite(x) and math.isfinite(y) and math.isfinite(z):
-            points.append((x, y, z))
-    return points
+_TYPE_LABEL = {'pointcloud2': 'cloud', 'laserscan': '2d'}
 
 
-def decode_scan(raw):
-    msg = deserialize_message(raw, LaserScan)
-    points = []
-    angle = msg.angle_min
-    for r in msg.ranges:
-        if msg.range_min <= r <= msg.range_max and math.isfinite(r):
-            points.append((r * math.cos(angle), r * math.sin(angle)))
-        angle += msg.angle_increment
-    return points
+def source_capabilities(keys):
+    """Active-only capability summary: enabled filters plus deskew, or 'none'."""
+    active = [label for label, key in (
+        ('range', 'filter_range_enabled'),
+        ('angular', 'filter_angular_enabled'),
+        ('box', 'filter_box_enabled'),
+    ) if keys.get(key) == 'true']
+    if keys.get('deskew_active') == 'true':
+        active.append('deskew')
+    return ' '.join(active) if active else 'none'
 
 
-# Braille dot bit for (dx in 0..1, dy in 0..3) within one terminal cell.
-_BRAILLE_BITS = ((0x01, 0x02, 0x04, 0x40), (0x08, 0x10, 0x20, 0x80))
+def source_entries(statuses):
+    """Per-source display rows, sorted by name.
 
-
-class Braille:
-    """A W*2 x H*4 dot canvas rendered as one Braille character per cell."""
-
-    def __init__(self, width_cells, height_cells):
-        self.w = max(1, width_cells)
-        self.h = max(1, height_cells)
-        self.bits = [0] * (self.w * self.h)
-        self.density = [0] * (self.w * self.h)
-
-    def plot(self, fx, fy):
-        """fx, fy in [0, 1) canvas fractions; (0,0) is top-left."""
-        px = int(fx * self.w * 2)
-        py = int(fy * self.h * 4)
-        if not (0 <= px < self.w * 2 and 0 <= py < self.h * 4):
-            return
-        idx = (py // 4) * self.w + (px // 2)
-        self.bits[idx] |= _BRAILLE_BITS[px % 2][py % 4]
-        self.density[idx] += 1
-
-    def rows(self):
-        """Yield (row_text, [attr per cell]) where attr scales with density."""
-        for row in range(self.h):
-            chars = []
-            attrs = []
-            for col in range(self.w):
-                idx = row * self.w + col
-                bits = self.bits[idx]
-                chars.append(chr(0x2800 | bits) if bits else ' ')
-                d = self.density[idx]
-                if d >= 8:
-                    attrs.append(curses.A_BOLD)
-                elif d >= 3:
-                    attrs.append(curses.A_NORMAL)
-                else:
-                    attrs.append(curses.A_DIM)
-            yield ''.join(chars), attrs
-
-
-def compute_extent(points, fixed, previous):
-    if fixed > 0.0:
-        return fixed
-    if not points:
-        return previous or 10.0
-    magnitudes = sorted(max(abs(p[0]), abs(p[1]), abs(p[2])) for p in points)
-    extent = magnitudes[int(0.95 * (len(magnitudes) - 1))] or 1.0
-    if previous:
-        extent = 0.7 * previous + 0.3 * extent  # smooth so the view doesn't pump
-    return max(extent, 0.5)
-
-
-def human_bps(value):
-    try:
-        v = float(value)
-    except (TypeError, ValueError):
-        return '-'
-    if v < 0:
-        return '-'
-    for unit in ('B/s', 'KB/s', 'MB/s', 'GB/s'):
-        if v < 1024.0 or unit == 'GB/s':
-            return '%.1f%s' % (v, unit)
-        v /= 1024.0
-    return '-'
-
-
-def source_rows(statuses):
-    """[(name, rate, age, offset, label, level)] per source.
-
-    Bandwidth and filter-drop% are published on /diagnostics for external
-    tools but dropped from this table: bandwidth rarely changes an operator's
-    next action, and drop% reads as a confusing -1 on GPU builds (per-source
-    filtering runs inside the CUDA merge engine, so the kept count is unknown).
+    Every field comes straight from the source's /diagnostics status: name,
+    active topic, type, publish rate, message age (lag), health level with its
+    one-line reason, and the active-capability summary. Timing offset and
+    bandwidth are on /diagnostics for external tools but omitted here: they
+    rarely change an operator's next action, and drift already surfaces as row
+    color plus a warning-feed event.
     """
-    rows = []
-    for name in sorted(n for n in statuses if n.startswith('source ')):
-        status = statuses[name]
+    entries = []
+    for full in sorted(n for n in statuses if n.startswith('source ')):
+        status = statuses[full]
         keys = {kv.key: kv.value for kv in status.values}
         level = status.level if isinstance(status.level, int) else ord(status.level)
-        rows.append((
-            name[len('source '):],
-            keys.get('rate_hz', '-'),
-            keys.get('msg_age_sec', '-'),
-            keys.get('stamp_offset_ewma_sec', '-'),
-            status.message,
-            level,
-        ))
-    return rows
+        entries.append({
+            'name': full[len('source '):],
+            'topic': keys.get('topic', '-'),
+            'type': _TYPE_LABEL.get(keys.get('type'), keys.get('type', '?')),
+            'rate': keys.get('rate_hz', '-'),
+            'age': keys.get('msg_age_sec', '-'),
+            'level': level,
+            'reason': status.message,
+            'caps': source_capabilities(keys),
+        })
+    return entries
 
 
-def output_rows(statuses):
+def output_entries(statuses):
+    """Output rows (label, topic, rate_hz, points) for each enabled output."""
     out = statuses.get('output')
     if out is None:
         return []
     keys = {kv.key: kv.value for kv in out.values}
     rows = []
     if keys.get('cloud_topic'):
-        rows.append(('cloud out', keys.get('cloud_rate_hz', '-'),
-                     human_bps(keys.get('cloud_bandwidth_Bps')),
-                     keys.get('points_out', '-')))
+        rows.append(('cloud', keys['cloud_topic'],
+                     keys.get('cloud_rate_hz', '-'), human_count(keys.get('points_out'))))
     if keys.get('scan_topic'):
-        rows.append(('scan out', keys.get('scan_rate_hz', '-'),
-                     human_bps(keys.get('scan_bandwidth_Bps')), '-'))
+        rows.append(('scan', keys['scan_topic'], keys.get('scan_rate_hz', '-'), ''))
     return rows
 
 
-def capabilities_lines(statuses):
-    """Lines for the left-hand 'capabilities' column: engine, outputs, and
-    per-source type/rate-mode/filters/deskew, all straight from /diagnostics."""
-    node = statuses.get('node')
-    out = statuses.get('output')
-    node_keys = {kv.key: kv.value for kv in node.values} if node else {}
-    out_keys = {kv.key: kv.value for kv in out.values} if out else {}
-    lines = [
-        'engine:    %s' % node_keys.get('engine', '?'),
-        'cloud out: %s' % (out_keys.get('cloud_topic') or 'disabled'),
-        'scan out:  %s' % (out_keys.get('scan_topic') or 'disabled'),
-    ]
-    imu = statuses.get('imu')
-    if imu:
-        ikeys = {kv.key: kv.value for kv in imu.values}
-        lines.append('imu:       %s' % ikeys.get('topic', '?'))
-        lines.append('  rate: %s hz  valid: %s' % (
-            ikeys.get('rate_hz', '-'), ikeys.get('valid', '?')))
-    for name in sorted(n for n in statuses if n.startswith('source ')):
-        keys = {kv.key: kv.value for kv in statuses[name].values}
-        short = name[len('source '):]
-        lines.append('')
-        lines.append('%s (%s/%s)' % (short, keys.get('type', '?'),
-                                      keys.get('expected_rate_source', '?')))
-        active = [label for label, key in (
-            ('range', 'filter_range_enabled'),
-            ('angular', 'filter_angular_enabled'),
-            ('box', 'filter_box_enabled'),
-        ) if keys.get(key) == 'true']
-        lines.append('  filters: %s' % (','.join(active) if active else 'none'))
-        lines.append('  deskew:  %s' % (
-            'on' if keys.get('deskew_active') == 'true' else 'off'))
-    return lines
+def human_count(value):
+    """Compact point count: 61234 -> '61.2k'. Empty string when unknown."""
+    try:
+        n = int(value)
+    except (TypeError, ValueError):
+        return ''
+    if n < 0:
+        return ''
+    if n < 1000:
+        return str(n)
+    return '%.1fk' % (n / 1000.0)
+
+
+def human_uptime(value):
+    """Uptime seconds as a short string: '5s', '1m04s', or '2h05m'."""
+    try:
+        sec = int(float(value))
+    except (TypeError, ValueError):
+        return '-'
+    if sec < 60:
+        return '%ds' % sec
+    if sec < 3600:
+        return '%dm%02ds' % (sec // 60, sec % 60)
+    return '%dh%02dm' % (sec // 3600, (sec % 3600) // 60)
+
+
+def _num(value):
+    try:
+        return '%.1f' % float(value)
+    except (TypeError, ValueError):
+        return str(value)
+
+
+def _lag(value):
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return '-'
+    return '%.2fs' % v if v >= 0 else '-'
 
 
 _SOURCE_PALETTE = (5, 6, 7)  # curses color pair ids, assigned to sources as seen
 
 
 class Dashboard:
+    """Renders one diagnostics snapshot to the curses screen per redraw."""
 
     def __init__(self, ros, args):
         self.ros = ros
         self.args = args
-        self.fixed_extent = args.fixed_extent
-        self.show_viz = not args.no_viz
         self.paused = False
-        self.extent = None
         self._source_colors = {}   # source name -> curses color pair id
-        # Decoding a PointCloud2/LaserScan is the expensive part of a redraw;
-        # cache by raw-bytes identity so a higher --rate doesn't re-decode
-        # the same message every frame when the topic itself publishes slower.
-        self._cloud_cache_raw = None
-        self._cloud_cache_points = []
-        self._scan_cache_raw = None
-        self._scan_cache_points = []
+        self._feed_cache = []
 
     def _color_for_source(self, name):
         if name not in self._source_colors:
@@ -410,17 +272,14 @@ class Dashboard:
             self._source_colors[name] = _SOURCE_PALETTE[idx]
         return self._source_colors[name]
 
-    def _decode_cloud_cached(self, raw):
-        if raw is not self._cloud_cache_raw:
-            self._cloud_cache_raw = raw
-            self._cloud_cache_points = decode_cloud(raw) if raw else []
-        return self._cloud_cache_points
-
-    def _decode_scan_cached(self, raw):
-        if raw is not self._scan_cache_raw:
-            self._scan_cache_raw = raw
-            self._scan_cache_points = decode_scan(raw) if raw else []
-        return self._scan_cache_points
+    @staticmethod
+    def _level_attr(level):
+        """Calm default for OK; yellow for WARN, red for ERROR, both bold."""
+        if level == 1:
+            return curses.color_pair(2) | curses.A_BOLD
+        if level >= 2:
+            return curses.color_pair(3) | curses.A_BOLD
+        return curses.A_NORMAL
 
     def run(self, stdscr):
         curses.curs_set(0)
@@ -456,10 +315,6 @@ class Dashboard:
                 return False
             if key in (ord('q'), ord('Q')):
                 return True
-            if key in (ord('f'), ord('F')):
-                self.fixed_extent = 0.0 if self.fixed_extent else (self.extent or 10.0)
-            if key in (ord('v'), ord('V')):
-                self.show_viz = not self.show_viz
             if key in (ord('p'), ord('P')):
                 self.paused = not self.paused
             if key == curses.KEY_RESIZE:
@@ -470,134 +325,106 @@ class Dashboard:
         state = self.ros.snapshot()
         height, width = stdscr.getmaxyx()
         stdscr.erase()
-        if height < 8 or width < 40:
-            stdscr.addstr(0, 0, 'terminal too small for polka_monitor')
+        if height < 6 or width < 40:
+            stdscr.addstr(0, 0, 'terminal too small for polka_monitor'[:width - 1])
             stdscr.refresh()
             return
 
-        body_height = height - 1
-        self._draw_status_bar(stdscr, state, height - 1, width)
-
-        # Three columns on wide terminals: capabilities | viz | table+feed.
-        # Narrower terminals drop the capabilities column entirely rather
-        # than squeezing three panes into too little space.
-        cap_width = 32 if width >= 130 else 0
-        x = 0
-        if cap_width:
-            self._draw_capabilities(stdscr, state, 0, 0, cap_width, body_height)
-            x = cap_width + 1
-
-        remaining = width - x
-        viz_width = (remaining * 55 // 100) if (self.show_viz and remaining >= 100) else 0
-        if viz_width:
-            self._draw_views(stdscr, state, 0, x, body_height, viz_width)
-        right_x = x + viz_width + (1 if viz_width else 0)
-        self._draw_right(stdscr, state, right_x, width - right_x, body_height)
-
-        for y in range(body_height):
-            if cap_width:
-                stdscr.addch(y, cap_width, curses.ACS_VLINE)
-            if viz_width:
-                stdscr.addch(y, x + viz_width, curses.ACS_VLINE)
-        stdscr.refresh()
-
-    def _draw_capabilities(self, stdscr, state, y0, x0, width, height):
-        stdscr.addstr(y0, x0, ' capabilities'[:width - 1], curses.A_UNDERLINE)
-        for i, line in enumerate(capabilities_lines(state['statuses'])):
-            row = y0 + 1 + i
-            if row >= y0 + height:
-                break
-            stdscr.addstr(row, x0, (' ' + line)[:width - 1], curses.A_DIM)
-
-    def _draw_views(self, stdscr, state, y0, x0, height, width):
-        cloud = self._decode_cloud_cached(state['cloud_raw'])
-        scan = self._decode_scan_cached(state['scan_raw'])
-        self.extent = compute_extent(cloud, self.fixed_extent, self.extent)
-        extent = self.extent
-
-        # 3 stacked panels: top (cloud x-y, scan overlaid), side (cloud x-z),
-        # and a dedicated scan-only panel so the scan isn't lost in the cloud
-        # overlay. Overhead is 3 label rows + 2 blank spacer rows between panels.
-        usable = max(9, height - 5)
-        top_h = max(3, usable * 45 // 100)
-        side_h = max(3, usable * 25 // 100)
-        scan_h = max(3, usable - top_h - side_h)
-
-        label = 'auto' if not self.fixed_extent else 'fixed'
-        stdscr.addstr(y0, x0, ' top view (x up, y left)  extent %.1fm [%s]'
-                      % (extent, label), curses.A_UNDERLINE)
-
-        canvas = Braille(width - 1, top_h)
-        for x, y, _ in cloud:
-            canvas.plot(0.5 - y / (2 * extent), 0.5 - x / (2 * extent))
-        self._blit(stdscr, canvas, y0 + 1, x0, 0)
-        # Scan gets its own dedicated panel below, so it's not also overlaid here.
-        if not cloud:
-            stdscr.addstr(y0 + 2, x0 + 2, 'waiting for merged cloud...', curses.A_DIM)
-
-        side_y = y0 + top_h + 2
-        stdscr.addstr(side_y, x0, ' side view (z up, x right)', curses.A_UNDERLINE)
-        canvas = Braille(width - 1, side_h)
-        for x, _, z in cloud:
-            canvas.plot(0.5 + x / (2 * extent), 0.5 - z / (2 * extent))
-        self._blit(stdscr, canvas, side_y + 1, x0, 0)
-
-        scan_y = side_y + side_h + 2
-        stdscr.addstr(scan_y, x0, ' scan view (merged LaserScan only)', curses.A_UNDERLINE)
-        canvas = Braille(width - 1, scan_h)
-        for x, y in scan:
-            canvas.plot(0.5 - y / (2 * extent), 0.5 - x / (2 * extent))
-        self._blit(stdscr, canvas, scan_y + 1, x0, curses.color_pair(4))
-        if not scan:
-            stdscr.addstr(scan_y + 2, x0 + 2, 'waiting for merged scan...', curses.A_DIM)
-
-    @staticmethod
-    def _blit(stdscr, canvas, y0, x0, color):
-        for i, (text, attrs) in enumerate(canvas.rows()):
-            for j, char in enumerate(text):
-                if char != ' ':
-                    stdscr.addstr(y0 + i, x0 + j, char, color | attrs[j])
-
-    def _draw_right(self, stdscr, state, x0, width, height):
+        self._draw_top_bar(stdscr, state, width)
         statuses = state['statuses']
-        row = 0
         if not statuses:
             hint = ('waiting for /diagnostics from %s...' % self.args.node
                     if not state['saw_node'] else
                     'node seen but no diagnostics - try: ros2 param set /%s '
                     'diagnostics.enabled true' % self.args.node)
-            stdscr.addstr(1, x0 + 1, hint[:width - 2], curses.A_DIM)
+            stdscr.addstr(2, 1, hint[:width - 2], curses.A_DIM)
+            stdscr.refresh()
             return
 
-        header = ' %-10s %6s %8s %8s' % (
-            'source', 'hz', 'age', 'offset')
-        stdscr.addstr(row, x0, header[:width - 1], curses.A_UNDERLINE)
+        row = self._draw_sources(stdscr, statuses, 2, width, height)
+        row = self._draw_outputs(stdscr, statuses, row + 1, width, height)
+        self._draw_feed(stdscr, state, row + 1, width, height)
+        stdscr.refresh()
+
+    def _draw_top_bar(self, stdscr, state, width):
+        node = state['statuses'].get('node')
+        summary = 'disconnected'
+        if node is not None:
+            keys = {kv.key: kv.value for kv in node.values}
+            summary = 'engine %s   %s/%s fresh   out %s Hz   up %s' % (
+                keys.get('engine', '?'),
+                keys.get('sources_fresh', '?'), keys.get('sources_total', '?'),
+                _num(keys.get('output_rate_hz', '-')), human_uptime(keys.get('uptime_sec')))
+        left = ' %s   %s' % (self.args.node, summary)
+        right = 'p pause  q quit '
+        if len(left) + len(right) < width:
+            left = left + ' ' * (width - len(left) - len(right) - 1) + right
+        stdscr.addstr(0, 0, left[:width - 1], curses.A_REVERSE)
+
+    def _draw_sources(self, stdscr, statuses, row, width, height):
+        wide = width >= WIDE_MIN_COLS
+        fmt = ' %-10s %-24s %-5s %6s %8s  %s'
+        stdscr.addstr(row, 0, ' SOURCES'[:width - 1], curses.A_UNDERLINE)
         row += 1
-        for (name, rate, age, offset, label, level) in source_rows(statuses):
-            # Bold makes these render as light tints instead of the base
-            # 8-color palette's dark shades (plain blue is nearly invisible
-            # on a black background).
-            color = curses.color_pair({0: 1, 1: 2}.get(level, 3)) | curses.A_BOLD
-            line = ' %-10s %6s %8s %8s' % (
-                name[:10], _num(rate), _num(age), _num(offset))
-            stdscr.addstr(row, x0, line[:width - 1], color)
+        if wide and row < height:
+            header = fmt % ('name', 'topic', 'type', 'hz', 'lag', 'capabilities')
+            stdscr.addstr(row, 0, header[:width - 1], curses.A_DIM)
             row += 1
-            if level != 0:
-                stdscr.addstr(row, x0, ('   └ %s' % label)[:width - 1], color)
+        for e in source_entries(statuses):
+            if row >= height:
+                break
+            attr = self._level_attr(e['level'])
+            if wide:
+                line = fmt % (e['name'][:10], e['topic'][:24], e['type'][:5],
+                              _num(e['rate']), _lag(e['age']), e['caps'])
+                stdscr.addstr(row, 0, line[:width - 1], attr)
                 row += 1
-        for (name, rate, bw, points) in output_rows(statuses):
-            line = ' %-10s %6s %9s  points_out=%s' % (name, _num(rate), bw, points)
-            stdscr.addstr(row, x0, line[:width - 1], curses.color_pair(4) | curses.A_BOLD)
-            row += 1
+            else:
+                line = ' %-10s %6s %8s' % (e['name'][:10], _num(e['rate']), _lag(e['age']))
+                stdscr.addstr(row, 0, line[:width - 1], attr)
+                row += 1
+                if row < height:
+                    sub = '   %s  %s  %s' % (e['topic'], e['type'], e['caps'])
+                    stdscr.addstr(row, 0, sub[:width - 1], curses.A_DIM)
+                    row += 1
+            if e['level'] != 0 and row < height:
+                stdscr.addstr(row, 0, ('   ! %s' % e['reason'])[:width - 1], attr)
+                row += 1
+        return row
+
+    def _draw_outputs(self, stdscr, statuses, row, width, height):
+        if row >= height:
+            return row
+        stdscr.addstr(row, 0, ' OUTPUTS'[:width - 1], curses.A_UNDERLINE)
         row += 1
-        title = ' warnings %s' % ('(paused)' if self.paused else '')
-        stdscr.addstr(row, x0, title[:width - 1], curses.A_UNDERLINE)
+        for label, topic, rate, points in output_entries(statuses):
+            if row >= height:
+                return row
+            tail = '  %s pts' % points if points else ''
+            line = ' %-6s %-30s %6s Hz%s' % (label, topic[:30], _num(rate), tail)
+            stdscr.addstr(row, 0, line[:width - 1], curses.color_pair(4) | curses.A_BOLD)
+            row += 1
+        imu = statuses.get('imu')
+        if imu is not None and row < height:
+            keys = {kv.key: kv.value for kv in imu.values}
+            level = imu.level if isinstance(imu.level, int) else ord(imu.level)
+            valid = 'valid' if keys.get('valid') == 'true' else 'no data'
+            line = ' %-6s %-30s %6s Hz  %s' % (
+                'imu', keys.get('topic', '?')[:30], _num(keys.get('rate_hz', '-')), valid)
+            stdscr.addstr(row, 0, line[:width - 1], self._level_attr(level))
+            row += 1
+        return row
+
+    def _draw_feed(self, stdscr, state, row, width, height):
+        if row >= height:
+            return
+        title = ' WARNINGS%s' % ('  (paused)' if self.paused else '')
+        stdscr.addstr(row, 0, title[:width - 1], curses.A_UNDERLINE)
         row += 1
         if not self.paused:
             self._feed_cache = state['feed']
-        feed = getattr(self, '_feed_cache', state['feed'])
         last_text = None
-        for (stamp, severity, source, text) in feed:
+        for (stamp, severity, source, text) in self._feed_cache:
             if row >= height:
                 break
             if text == last_text:
@@ -609,35 +436,16 @@ class Dashboard:
                 color = curses.color_pair({0: 1, 1: 2}.get(severity, 3))
             # Always bold: the base 8-color palette's dark shades (blue in
             # particular) are close to invisible on a black background.
-            attr = curses.A_BOLD
+            attr = color | curses.A_BOLD
             clock = time.strftime('%H:%M:%S', time.localtime(stamp))
-            prefix = ' %s ' % clock
+            prefix = ' %s  ' % clock
             avail = max(10, width - 1 - len(prefix))
             for i, line in enumerate(textwrap.wrap(text, width=avail) or ['']):
                 if row >= height:
                     break
                 rendered = (prefix + line) if i == 0 else (' ' * len(prefix) + line)
-                stdscr.addstr(row, x0, rendered[:width - 1], color | attr)
+                stdscr.addstr(row, 0, rendered[:width - 1], attr)
                 row += 1
-
-    def _draw_status_bar(self, stdscr, state, y, width):
-        node_status = state['statuses'].get('node')
-        engine = ''
-        if node_status is not None:
-            keys = {kv.key: kv.value for kv in node_status.values}
-            engine = '%s | %s/%s fresh | reconfigs %s' % (
-                keys.get('engine', '?'), keys.get('sources_fresh', '?'),
-                keys.get('sources_total', '?'), keys.get('reconfig_count', '?'))
-        bar = ' %s | %s | q quit  f extent  v views  p pause ' % (
-            self.args.node, engine or 'disconnected')
-        stdscr.addstr(y, 0, bar[:width - 1], curses.A_REVERSE)
-
-
-def _num(value):
-    try:
-        return '%.1f' % float(value)
-    except (TypeError, ValueError):
-        return str(value)
 
 
 def main():

@@ -14,7 +14,8 @@ Forthcoming
 * Add ``polka_monitor`` terminal diagnostics dashboard and ``dashboard`` launch arg.
 * Two-phase runtime reconfigure and ``/diagnostics`` stats with timing and rate drift flags.
 * CPU and CUDA merge performance optimizations, plus bounded stale-source reuse.
-* Coarse-stride SE(3) rotation interpolation for faster per-point deskew.
+* CPU angular filter replaces per-point atan2 with a precomputed cross-product half-plane test, about 3x faster (10.47 to 3.55 ms per tick at 259k points).
+* Coarse-stride SE(3) rotation interpolation cuts per-source deskew latency from ~9.8 ms to ~1.6 ms (about 6.2x) with negligible accuracy loss (max error ~1.6e-7 cm).
 * Estimate body-frame gravity via EMA when the IMU lacks orientation.
 * Detect rosbag/clock misconfiguration and expose ``use_sim_time``.
 * Per-point timestamp passthrough with a duplicate-timestamp guard.

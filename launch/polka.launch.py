@@ -39,6 +39,23 @@ def generate_launch_description():
         # compares against bag time rather than wall time:
         #   ros2 launch polka polka.launch.py use_sim_time:=true
         DeclareLaunchArgument('use_sim_time', default_value='false'),
+        # Opt-in terminal dashboard. When false (default) polka behaves exactly as
+        # before, logging to screen. When true the node's stdout is redirected to the
+        # log file and the polka_monitor TUI takes over this terminal instead.
+        #   ros2 launch polka polka.launch.py dashboard:=true
+        # The dashboard is equally available standalone in any other terminal:
+        #   ros2 run polka polka_monitor
+        DeclareLaunchArgument('dashboard', default_value='true'),
+
+        # Normal path: node owns the terminal for its logs.
+        Node(
+            package='polka',
+            executable='polka_node',
+            name='polka',
+            output='screen',
+            parameters=node_params,
+            condition=UnlessCondition(dashboard),
+        ),
 
         # The terminal dashboard is always on. The node logs to file so its output
         # does not fight the TUI; the polka_monitor TUI (below) owns this terminal.

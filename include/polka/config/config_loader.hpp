@@ -28,19 +28,49 @@ class ConfigLoader
 {
 public:
   explicit ConfigLoader(rclcpp::Node * node);
+
+  // Startup load: strict validation (every source needs a topic).
   MergeConfig load();
+
+  // Runtime re-read of committed parameter storage. Declares parameters for
+  // source names not seen before and tolerates "pending" sources whose topic
+  // is still empty, so sources can be added incrementally at runtime.
   MergeConfig reload(const std::vector<std::string> & source_names);
+
+  // Validation pass over *proposed* parameter values, overlaid on committed
+  // storage. Never mutates node state (no declares). Throws with a
+  // human-readable, prefix-qualified reason on invalid config - the caller
+  // surfaces it as SetParametersResult.reason.
+  //
+  // This exists because Humble's on-set callback fires BEFORE the new values
+  // are committed: reading get_parameter() there returns the old values, so
+  // validation must work from the proposed list instead.
+  MergeConfig preview(
+    const std::vector<rclcpp::Parameter> & proposed,
+    const std::vector<std::string> & source_names);
 
 private:
   rclcpp::Node * node_;
   rclcpp::Logger logger_;
+  // When set, parameter reads resolve from this list before node storage.
+  const std::vector<rclcpp::Parameter> * overlay_ = nullptr;
 
   void declare_defaults();
+  void declare_source_params(const std::string & name);
+  MergeConfig read_config(const std::vector<std::string> & source_names, bool allow_pending);
   MergeConfig read_common_params();
+  SourceConfig read_source_config(const std::string & name);
   FilterParams load_filter_params(const std::string & prefix);
   OutputQosConfig load_output_qos(const std::string & prefix);
-  SelfFilterConfig load_self_filter_config(const std::string & prefix);
-  void validate(const MergeConfig & config);
+  SelfFilterConfig load_self_filter_config(const std::string & prefix, bool declare_missing);
+  void validate(const MergeConfig & config, bool allow_pending);
+
+  // overlay -> committed storage; throws if the parameter was never declared.
+  rclcpp::Parameter param(const std::string & name) const;
+  // overlay -> committed storage -> fallback default. For parameters that may
+  // not be declared yet (a new source's params during preview).
+  template<typename T>
+  T param_or(const std::string & name, const T & def) const;
 };
 
 }  // namespace polka

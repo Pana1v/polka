@@ -14,16 +14,28 @@
 
 import os
 
+from ament_index_python.packages import get_package_prefix
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
+from launch.actions import ExecuteProcess
+from launch.conditions import IfCondition
+from launch.conditions import UnlessCondition
 from launch.substitutions import LaunchConfiguration
+from launch.substitutions import PythonExpression
 from launch_ros.actions import Node
 
 
 def generate_launch_description():
     pkg_dir = get_package_share_directory('polka')
     default_config = os.path.join(pkg_dir, 'config', 'example_params.yaml')
+
+    config_file = LaunchConfiguration('config_file')
+    use_sim_time = LaunchConfiguration('use_sim_time')
+    dashboard = LaunchConfiguration('dashboard')
+    dashboard_viz = LaunchConfiguration('dashboard_viz')
+
+    node_params = [config_file, {'use_sim_time': use_sim_time}]
 
     return LaunchDescription([
         DeclareLaunchArgument('config_file', default_value=default_config),
@@ -32,14 +44,53 @@ def generate_launch_description():
         # compares against bag time rather than wall time:
         #   ros2 launch polka polka.launch.py use_sim_time:=true
         DeclareLaunchArgument('use_sim_time', default_value='false'),
+        # Opt-in terminal dashboard. When false (default) polka behaves exactly as
+        # before, logging to screen. When true the node's stdout is redirected to the
+        # log file and the polka_monitor TUI takes over this terminal instead.
+        #   ros2 launch polka polka.launch.py dashboard:=true
+        # The dashboard is equally available standalone in any other terminal:
+        #   ros2 run polka polka_monitor
+        DeclareLaunchArgument('dashboard', default_value='false'),
+        # Point-cloud/scan views roughly double the dashboard's CPU use (measured
+        # ~30% vs ~14% of one core decoding and Braille-rendering the merged
+        # cloud). Set false for a lighter table/feed-only dashboard.
+        #   ros2 launch polka polka.launch.py dashboard:=true dashboard_viz:=false
+        DeclareLaunchArgument('dashboard_viz', default_value='true'),
+
+        # Normal path: node owns the terminal for its logs.
         Node(
             package='polka',
             executable='polka_node',
             name='polka',
             output='screen',
-            parameters=[
-                LaunchConfiguration('config_file'),
-                {'use_sim_time': LaunchConfiguration('use_sim_time')},
-            ],
+            parameters=node_params,
+            condition=UnlessCondition(dashboard),
+        ),
+
+        # Dashboard path: node logs to file only, so its output does not fight the TUI.
+        Node(
+            package='polka',
+            executable='polka_node',
+            name='polka',
+            output={'both': 'log'},
+            parameters=node_params,
+            condition=IfCondition(dashboard),
+        ),
+        # ros2 launch pipes child stdio (no controlling TTY, no stdin), which curses
+        # needs. Re-attach the monitor to the real terminal via /dev/tty so it can draw
+        # and read keys. Standalone `ros2 run polka polka_monitor` needs none of this.
+        # Exec the installed script directly (not through `ros2 run`, which forks its
+        # own child process) so this action tracks a single PID launch can reliably
+        # signal on shutdown - going through ros2 run left an orphaned polka_monitor
+        # process behind on Ctrl-C, since launch's SIGINT/SIGTERM never reached the
+        # grandchild it spawns.
+        ExecuteProcess(
+            cmd=['bash', '-c',
+                 ['exec "%s" --node polka' % os.path.join(
+                     get_package_prefix('polka'), 'lib', 'polka', 'polka_monitor'),
+                  PythonExpression(["'' if '", dashboard_viz, "' == 'true' else ' --no-viz'"]),
+                  ' </dev/tty >/dev/tty 2>&1']],
+            output='screen',
+            condition=IfCondition(dashboard),
         ),
     ])

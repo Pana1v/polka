@@ -465,6 +465,13 @@ CloudT::Ptr CudaMergeEngine::merge(const std::vector<MergeInput> & sources)
         src.cloud->size(), impl_->max_points_per_source);
     }
     size_t n = std::min(src.cloud->size(), impl_->max_points_per_source);
+    // Total clamp: device buffers were sized for the source set at engine
+    // construction; never write past them even if more sources show up.
+    if (n > impl_->max_total_points - input_offset) {
+      n = impl_->max_total_points - input_offset;
+      fprintf(stderr, "[polka] CUDA: device buffer full, truncating source to %zu points\n", n);
+      if (n == 0) break;
+    }
 
     std::vector<float4> packed(n);
     std::vector<double> packed_time(n);
@@ -537,6 +544,13 @@ PipelineResult CudaMergeEngine::merge_pipeline(
         src.cloud->size(), impl_->max_points_per_source);
     }
     size_t n = std::min(src.cloud->size(), impl_->max_points_per_source);
+    // Total clamp: device buffers were sized for the source set at engine
+    // construction; never write past them even if more sources show up.
+    if (n > impl_->max_total_points - input_offset) {
+      n = impl_->max_total_points - input_offset;
+      fprintf(stderr, "[polka] CUDA: device buffer full, truncating source to %zu points\n", n);
+      if (n == 0) break;
+    }
 
     std::vector<float4> packed(n);
     std::vector<double> packed_time(n);

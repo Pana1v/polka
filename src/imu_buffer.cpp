@@ -24,7 +24,7 @@ namespace polka
 {
 
 ImuBuffer::ImuBuffer(rclcpp::Node * node, const std::string & topic, int buffer_size)
-: max_size_(buffer_size), logger_(node->get_logger()), clock_(node->get_clock())
+: topic_(topic), max_size_(buffer_size), logger_(node->get_logger()), clock_(node->get_clock())
 {
   sub_ = node->create_subscription<sensor_msgs::msg::Imu>(
     topic, rclcpp::SensorDataQoS(),
@@ -37,6 +37,12 @@ ImuBuffer::ImuBuffer(rclcpp::Node * node, const std::string & topic, int buffer_
 std::shared_ptr<const AveragedImu> ImuBuffer::snapshot() const
 {
   return std::atomic_load(&snapshot_);
+}
+
+rclcpp::Time ImuBuffer::last_stamp() const
+{
+  std::lock_guard<std::mutex> lock(mutex_);
+  return last_stamp_;
 }
 
 void ImuBuffer::callback(sensor_msgs::msg::Imu::ConstSharedPtr msg)
@@ -80,7 +86,7 @@ void ImuBuffer::callback(sensor_msgs::msg::Imu::ConstSharedPtr msg)
     accel -= g_body_ema_;
     RCLCPP_INFO_ONCE(
       logger_,
-      "polka: IMU has no orientation — estimating body-frame gravity via EMA");
+      "polka: IMU has no orientation, estimating body-frame gravity via EMA");
   }
 
   ImuSample sample;
@@ -94,7 +100,9 @@ void ImuBuffer::callback(sensor_msgs::msg::Imu::ConstSharedPtr msg)
     while (static_cast<int>(buffer_.size()) > max_size_) {
       buffer_.pop_front();
     }
+    last_stamp_ = sample.stamp;
   }
+  msg_count_.fetch_add(1, std::memory_order_relaxed);
 
   auto avg = std::make_shared<AveragedImu>();
   avg->angular_vel = Eigen::Vector3d(w.x, w.y, w.z);

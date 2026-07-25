@@ -60,6 +60,39 @@ polka:
       deskew_timestamp_field: "auto" # "auto" or specific field name (e.g. "time")
 
     # --------------------------------------------------
+    # Diagnostics & Drift Detection
+    # --------------------------------------------------
+    # Publishes a diagnostic_msgs/DiagnosticArray on /diagnostics with one
+    # status per source (rate, bandwidth, message age, stamp offset, filter
+    # drop rate, drift flags) plus node and output summaries. Consumed by
+    # rqt_robot_monitor, diagnostic_aggregator, and `ros2 run polka
+    # polka_monitor`. Near-free (~1 KB/s), so it defaults to on.
+    #
+    # Drift flags raise only after min_ticks consecutive bad ticks and clear
+    # with hysteresis (below 80% of the threshold), so one jittery tick never
+    # flips a flag. All values are runtime-reconfigurable via `ros2 param set`.
+
+    diagnostics:
+      enabled: true
+      publish_period_sec: 1.0        # seconds between /diagnostics updates
+
+      # Timing drift - a source's stamps trending away from its peers.
+      # Tracks an EWMA of (source stamp - median stamp of fresh sources);
+      # needs at least 2 fresh sources to have a peer reference.
+      timing_drift:
+        threshold_sec: 0.1           # seconds - flag when |EWMA offset| exceeds this
+        ewma_alpha: 0.2              # smoothing factor (1.0 = no smoothing)
+        min_ticks: 5                 # consecutive ticks over threshold before raising
+
+      # Rate drift - a source publishing slower than expected ("lagging").
+      # Expected rate comes from sources.<name>.expected_rate, or is
+      # auto-baselined from the median observed rate when that is 0.
+      rate_drift:
+        sag_pct: 20.0                # percent below expected rate that counts as sagging
+        min_ticks: 5                 # consecutive sagging ticks before raising
+        baseline_sec: 10.0           # observation window for the auto-baseline
+
+    # --------------------------------------------------
     # Outputs
     # --------------------------------------------------
 
@@ -195,6 +228,8 @@ polka:
                                         # has its own IMU; global IMU recommended for rigid platforms
         qos_reliability: "best_effort"   # "best_effort" or "reliable"
         qos_history_depth: 1
+        # expected_rate: 10.0            # Hz - nominal publish rate for rate-drift detection
+                                         # (0 or omitted = auto-baseline from observed rates)
         filters:
           # Drop self-reflections too close to the sensor
           range:

@@ -155,6 +155,18 @@ struct SourceConfig
   std::string qos_reliability = "best_effort";
   int qos_history_depth = 1;
   FilterParams filter_params;
+  double expected_rate = 0.0;  // Hz; 0 = auto-baseline from observed rates
+
+  // Everything that is baked into a constructed SourceAdapter (subscription
+  // topic/type/QoS, per-source IMU). When any of these change at runtime the
+  // adapter must be recreated; filters and expected_rate apply in place.
+  bool same_identity(const SourceConfig & other) const
+  {
+    return topic == other.topic && type == other.type &&
+           qos_reliability == other.qos_reliability &&
+           qos_history_depth == other.qos_history_depth &&
+           imu_topic == other.imu_topic;
+  }
 };
 
 struct HeightCapConfig
@@ -226,6 +238,42 @@ struct MotionCompensationConfig
   std::string imu_frame = "";                     // empty = auto-detect from IMU msg header
 };
 
+struct DiagnosticsConfig
+{
+  bool enabled = true;
+  double publish_period_sec = 1.0;
+  // Timing drift: EWMA of (source stamp - peer median) trending past a bound.
+  double timing_threshold_sec = 0.1;
+  double timing_ewma_alpha = 0.2;
+  int timing_min_ticks = 5;
+  // Rate drift: windowed rate sagging below the expected rate.
+  double rate_sag_pct = 20.0;
+  int rate_min_ticks = 5;
+  double rate_baseline_sec = 10.0;
+
+  void validate() const
+  {
+    if (publish_period_sec <= 0.0) {
+      throw std::invalid_argument("publish_period_sec must be positive");
+    }
+    if (timing_threshold_sec <= 0.0) {
+      throw std::invalid_argument("timing_drift.threshold_sec must be positive");
+    }
+    if (timing_ewma_alpha <= 0.0 || timing_ewma_alpha > 1.0) {
+      throw std::invalid_argument("timing_drift.ewma_alpha must be in (0, 1]");
+    }
+    if (timing_min_ticks < 1 || rate_min_ticks < 1) {
+      throw std::invalid_argument("min_ticks must be >= 1");
+    }
+    if (rate_sag_pct <= 0.0 || rate_sag_pct >= 100.0) {
+      throw std::invalid_argument("rate_drift.sag_pct must be in (0, 100)");
+    }
+    if (rate_baseline_sec <= 0.0) {
+      throw std::invalid_argument("rate_drift.baseline_sec must be positive");
+    }
+  }
+};
+
 struct MergeConfig
 {
   std::string output_frame_id = "base_link";
@@ -243,6 +291,7 @@ struct MergeConfig
   bool suppress_duplicate_timestamps = true;
 
   MotionCompensationConfig motion_compensation;
+  DiagnosticsConfig diagnostics;
 
   CloudOutputConfig cloud_output;
   ScanOutputConfig scan_output;

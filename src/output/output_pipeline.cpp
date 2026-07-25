@@ -47,34 +47,36 @@ void OutputPipeline::build_filters()
   }
 }
 
-void OutputPipeline::process(CloudT & cloud, const std::string & frame_id) const
+void OutputPipeline::process(CloudT::Ptr cloud, const std::string & frame_id) const
 {
   for (const auto & filter : filters_) {
-    filter->apply(cloud, frame_id);
+    filter->apply(*cloud, frame_id);
   }
 
   if (config_.height_cap.enabled) {
     const float z_min = static_cast<float>(config_.height_cap.z_min);
     const float z_max = static_cast<float>(config_.height_cap.z_max);
     size_t j = 0;
-    for (size_t i = 0; i < cloud.size(); ++i) {
-      if (cloud[i].z >= z_min && cloud[i].z <= z_max) {
-        cloud[j++] = cloud[i];
+    for (size_t i = 0; i < cloud->size(); ++i) {
+      if ((*cloud)[i].z >= z_min && (*cloud)[i].z <= z_max) {
+        (*cloud)[j++] = (*cloud)[i];
       }
     }
-    cloud.resize(j);
-    cloud.width = static_cast<uint32_t>(j);
-    cloud.height = 1;
-    cloud.is_dense = true;
+    cloud->resize(j);
+    cloud->width = static_cast<uint32_t>(j);
+    cloud->height = 1;
+    cloud->is_dense = true;
   }
 
   if (config_.voxel.enabled) {
     pcl::VoxelGrid<PointT> vg;
-    vg.setInputCloud(cloud.makeShared());
+    // cloud is already the shared_ptr the caller owns - setInputCloud can use it
+    // directly instead of forcing a full deep copy via cloud->makeShared().
+    vg.setInputCloud(cloud);
     vg.setLeafSize(config_.voxel.leaf_x, config_.voxel.leaf_y, config_.voxel.leaf_z);
     CloudT filtered;
     vg.filter(filtered);
-    cloud = std::move(filtered);
+    *cloud = std::move(filtered);
   }
 }
 

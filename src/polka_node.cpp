@@ -708,11 +708,21 @@ void PolkaNode::output_callback()
     auto cloud = src.get_latest();
     if (!cloud || cloud->empty()) {continue;}
 
+    // A source past source_timeout is reused (its last-good cloud from
+    // get_latest() above, and last-good TF via slot.last_good_transform below)
+    // rather than dropped, until it's also past source_stale_reuse_window - a
+    // single momentarily-late tick on one source shouldn't visibly shrink the
+    // merged cloud. Only a source that's genuinely gone gets excluded.
+    if (src.is_stale(config_.source_stale_reuse_window, now)) {
+      RCLCPP_WARN_THROTTLE(
+        get_logger(), *get_clock(), kLogThrottleNormalMs,
+        "polka: source '%s' stale beyond reuse window, dropping", src.name().c_str());
+      continue;
+    }
     if (src.is_stale(config_.source_timeout, now)) {
       RCLCPP_WARN_THROTTLE(
         get_logger(), *get_clock(), kLogThrottleNormalMs,
-        "polka: source '%s' is stale", src.name().c_str());
-      continue;
+        "polka: source '%s' stale, reusing last-good cloud/TF", src.name().c_str());
     }
 
     Eigen::Isometry3d transform = Eigen::Isometry3d::Identity();
@@ -873,7 +883,7 @@ void PolkaNode::output_callback()
         "use enable_gpu for exact per-point time");
     }
 
-    output_pipeline_.process(*merged, config_.output_frame_id);
+    output_pipeline_.process(merged, config_.output_frame_id);
     last_points_out_ = static_cast<int64_t>(merged->size());
 
     if (cloud_pub_) {

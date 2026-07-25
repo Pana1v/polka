@@ -279,6 +279,12 @@ struct MergeConfig
   std::string output_frame_id = "base_link";
   double output_rate = 20.0;
   double source_timeout = 0.5;
+  // A source past source_timeout is reused (last-good cloud + last-good TF)
+  // rather than dropped from the merge until it's also past this longer
+  // bound - smooths over a single momentarily-late tick (real gaps on one
+  // source shouldn't visibly shrink the merged cloud) while still dropping
+  // a source that's genuinely gone. Must be >= source_timeout.
+  double source_stale_reuse_window = 1.5;
   bool enable_gpu = true;
 
   TimestampStrategy timestamp_strategy = TimestampStrategy::EARLIEST;

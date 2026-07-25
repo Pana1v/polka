@@ -315,6 +315,20 @@ struct CudaMergeEngine::Impl {
   int * d_scan_ranges_int = nullptr;
   float * d_scan_ranges_float = nullptr;
 
+  // Pinned host staging buffers (Stage 1 perf fix): preallocated once and reused
+  // every tick, instead of a fresh std::vector<float4>/<double> alloc + copy per
+  // source per tick. cudaMemcpyAsync is only genuinely asynchronous w.r.t. the
+  // host when the host pointer is pinned - with pageable memory (a plain
+  // std::vector, as before) the driver stages through pinned memory internally
+  // anyway, so this also removes a hidden implicit copy, not just the allocation.
+  // Only merge_pipeline() uses these: it's the only GPU path PolkaNode actually
+  // calls (is_gpu() always routes there), so merge() - unreachable in the real
+  // node - is left as-is rather than duplicating this optimization into dead code.
+  float4 * h_buf_in = nullptr;
+  double * h_time_in = nullptr;
+  float4 * h_buf_out = nullptr;
+  double * h_time_out = nullptr;
+
   cudaStream_t stream;
 
   GpuFilterParams to_gpu_filter(const FilterParams & fp) {
@@ -432,6 +446,11 @@ CudaMergeEngine::CudaMergeEngine(const MergeConfig & config)
   POLKA_CUDA_CHECK(cudaMalloc(&impl_->d_scan_ranges_int, POLKA_MAX_SCAN_BINS * sizeof(int)));
   POLKA_CUDA_CHECK(cudaMalloc(&impl_->d_scan_ranges_float, POLKA_MAX_SCAN_BINS * sizeof(float)));
 
+  POLKA_CUDA_CHECK(cudaMallocHost(&impl_->h_buf_in, impl_->max_total_points * sizeof(float4)));
+  POLKA_CUDA_CHECK(cudaMallocHost(&impl_->h_time_in, impl_->max_total_points * sizeof(double)));
+  POLKA_CUDA_CHECK(cudaMallocHost(&impl_->h_buf_out, impl_->max_total_points * sizeof(float4)));
+  POLKA_CUDA_CHECK(cudaMallocHost(&impl_->h_time_out, impl_->max_total_points * sizeof(double)));
+
   POLKA_CUDA_CHECK(cudaStreamCreate(&impl_->stream));
 }
 
@@ -449,6 +468,10 @@ CudaMergeEngine::~CudaMergeEngine()
   cudaFree(impl_->d_voxel_time);
   cudaFree(impl_->d_scan_ranges_int);
   cudaFree(impl_->d_scan_ranges_float);
+  cudaFreeHost(impl_->h_buf_in);
+  cudaFreeHost(impl_->h_time_in);
+  cudaFreeHost(impl_->h_buf_out);
+  cudaFreeHost(impl_->h_time_out);
   cudaStreamDestroy(impl_->stream);
   delete impl_;
 }
@@ -537,8 +560,16 @@ PipelineResult CudaMergeEngine::merge_pipeline(
 
   POLKA_CUDA_CHECK(cudaMemsetAsync(impl_->d_count_b, 0, sizeof(int), s));
 
-  size_t input_offset = 0;
-  for (const auto & src : sources) {
+  // Pack every source into the preallocated pinned host buffer first (single pass,
+  // no per-tick std::vector allocation), then issue ONE batched H2D copy for the
+  // whole tick instead of one small copy per source. Per-source transform upload +
+  // kernel launch still happens per source below (transforms differ per source and
+  // launch overhead is negligible next to the transfer this replaces).
+  std::vector<size_t> src_offset(sources.size());
+  std::vector<size_t> src_count(sources.size());
+  size_t total_points = 0;
+  for (size_t si = 0; si < sources.size(); ++si) {
+    const auto & src = sources[si];
     if (src.cloud->size() > impl_->max_points_per_source) {
       fprintf(stderr, "[polka] CUDA: source has %zu points, exceeds max %zu, truncating\n",
         src.cloud->size(), impl_->max_points_per_source);
@@ -546,40 +577,47 @@ PipelineResult CudaMergeEngine::merge_pipeline(
     size_t n = std::min(src.cloud->size(), impl_->max_points_per_source);
     // Total clamp: device buffers were sized for the source set at engine
     // construction; never write past them even if more sources show up.
-    if (n > impl_->max_total_points - input_offset) {
-      n = impl_->max_total_points - input_offset;
+    if (n > impl_->max_total_points - total_points) {
+      n = impl_->max_total_points - total_points;
       fprintf(stderr, "[polka] CUDA: device buffer full, truncating source to %zu points\n", n);
       if (n == 0) break;
     }
-
-    std::vector<float4> packed(n);
-    std::vector<double> packed_time(n);
+    src_offset[si] = total_points;
+    src_count[si] = n;
     for (size_t i = 0; i < n; ++i) {
       const auto & pt = src.cloud->points[i];
-      packed[i] = make_float4(pt.x, pt.y, pt.z, pt.intensity);
-      packed_time[i] = pt.time;
+      impl_->h_buf_in[total_points + i] = make_float4(pt.x, pt.y, pt.z, pt.intensity);
+      impl_->h_time_in[total_points + i] = pt.time;
     }
-    POLKA_CUDA_CHECK(cudaMemcpyAsync(impl_->d_buf_a + input_offset, packed.data(),
-      n * sizeof(float4), cudaMemcpyHostToDevice, s));
-    POLKA_CUDA_CHECK(cudaMemcpyAsync(impl_->d_time_a + input_offset, packed_time.data(),
-      n * sizeof(double), cudaMemcpyHostToDevice, s));
+    total_points += n;
+  }
 
-    Eigen::Matrix4f mat = src.transform.cast<float>().matrix();
+  if (total_points > 0) {
+    POLKA_CUDA_CHECK(cudaMemcpyAsync(impl_->d_buf_a, impl_->h_buf_in,
+      total_points * sizeof(float4), cudaMemcpyHostToDevice, s));
+    POLKA_CUDA_CHECK(cudaMemcpyAsync(impl_->d_time_a, impl_->h_time_in,
+      total_points * sizeof(double), cudaMemcpyHostToDevice, s));
+  }
+
+  for (size_t si = 0; si < sources.size(); ++si) {
+    size_t n = src_count[si];
+    if (n == 0) continue;
+    size_t input_offset = src_offset[si];
+
+    Eigen::Matrix4f mat = sources[si].transform.cast<float>().matrix();
     float tf[16];
     for (int r = 0; r < 4; ++r)
       for (int c = 0; c < 4; ++c)
         tf[r * 4 + c] = mat(r, c);
     POLKA_CUDA_CHECK(cudaMemcpyAsync(impl_->d_tf, tf, 16 * sizeof(float), cudaMemcpyHostToDevice, s));
 
-    GpuFilterParams gf = impl_->to_gpu_filter(src.filter_params);
+    GpuFilterParams gf = impl_->to_gpu_filter(sources[si].filter_params);
     int blocks = (static_cast<int>(n) + 255) / 256;
     fused_transform_filter_kernel<<<blocks, 256, 0, s>>>(
       impl_->d_buf_a + input_offset, impl_->d_time_a + input_offset,
       impl_->d_buf_b, impl_->d_time_b, impl_->d_count_b,
       impl_->d_tf, gf, static_cast<int>(n));
     POLKA_CUDA_CHECK_KERNEL();
-
-    input_offset += n;
   }
 
   int merge_count = 0;
@@ -671,14 +709,12 @@ PipelineResult CudaMergeEngine::merge_pipeline(
   }
 
   auto output = std::make_shared<CloudT>();
-  std::vector<float4> packed_out;
-  std::vector<double> packed_time_out;
+  // D2H into the preallocated pinned buffers (Stage 1 perf fix) instead of a fresh
+  // std::vector per tick - see h_buf_in/h_time_in comment at their declaration.
   if (cur_count > 0) {
-    packed_out.resize(cur_count);
-    packed_time_out.resize(cur_count);
-    POLKA_CUDA_CHECK(cudaMemcpyAsync(packed_out.data(), cur_data,
+    POLKA_CUDA_CHECK(cudaMemcpyAsync(impl_->h_buf_out, cur_data,
       cur_count * sizeof(float4), cudaMemcpyDeviceToHost, s));
-    POLKA_CUDA_CHECK(cudaMemcpyAsync(packed_time_out.data(), cur_time,
+    POLKA_CUDA_CHECK(cudaMemcpyAsync(impl_->h_time_out, cur_time,
       cur_count * sizeof(double), cudaMemcpyDeviceToHost, s));
   }
 
@@ -693,11 +729,11 @@ PipelineResult CudaMergeEngine::merge_pipeline(
     output->resize(cur_count);
     for (int i = 0; i < cur_count; ++i) {
       auto & pt = output->points[i];
-      pt.x = packed_out[i].x;
-      pt.y = packed_out[i].y;
-      pt.z = packed_out[i].z;
-      pt.intensity = packed_out[i].w;
-      pt.time = packed_time_out[i];
+      pt.x = impl_->h_buf_out[i].x;
+      pt.y = impl_->h_buf_out[i].y;
+      pt.z = impl_->h_buf_out[i].z;
+      pt.intensity = impl_->h_buf_out[i].w;
+      pt.time = impl_->h_time_out[i];
     }
   }
   output->width = static_cast<uint32_t>(cur_count);

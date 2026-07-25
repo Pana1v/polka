@@ -56,6 +56,7 @@ void ConfigLoader::declare_defaults()
   node_->declare_parameter<std::string>("output_frame_id", "base_link");
   node_->declare_parameter<double>("output_rate", 20.0);
   node_->declare_parameter<double>("source_timeout", 0.5);
+  node_->declare_parameter<double>("source_stale_reuse_window", 1.5);
   node_->declare_parameter<std::string>("timestamp_strategy", "earliest");
   node_->declare_parameter<double>("max_source_spread_warn", 0.05);
 
@@ -243,6 +244,7 @@ MergeConfig ConfigLoader::read_common_params()
   cfg.output_frame_id = param("output_frame_id").as_string();
   cfg.output_rate = param("output_rate").as_double();
   cfg.source_timeout = param("source_timeout").as_double();
+  cfg.source_stale_reuse_window = param("source_stale_reuse_window").as_double();
   cfg.enable_gpu = param("enable_gpu").as_bool();
   cfg.max_source_spread_warn = param("max_source_spread_warn").as_double();
 
@@ -446,11 +448,19 @@ void ConfigLoader::validate(const MergeConfig & config, bool allow_pending)
   if (config.sources.empty()) {
     throw std::runtime_error("polka: source_names is empty");
   }
-  if (config.output_rate <= 0.0 && config.output_rate != -1.0) {
-    throw std::runtime_error("polka: output_rate must be > 0 or -1 (adaptive)");
+  // -1 ("adaptive") was accepted here but never implemented: PolkaNode only creates
+  // output_timer_ when output_rate > 0.0, so -1 silently disabled all output with no
+  // warning. Fail loudly instead of shipping a node that never publishes.
+  if (config.output_rate <= 0.0) {
+    throw std::runtime_error(
+            "polka: output_rate must be > 0 (adaptive/-1 mode is not implemented)");
   }
   if (config.source_timeout <= 0.0) {
     throw std::runtime_error("polka: source_timeout must be > 0");
+  }
+  if (config.source_stale_reuse_window < config.source_timeout) {
+    throw std::runtime_error(
+            "polka: source_stale_reuse_window must be >= source_timeout");
   }
   if (!config.cloud_output.enabled && !config.scan_output.enabled) {
     throw std::runtime_error("polka: at least one output (cloud or scan) must be enabled");

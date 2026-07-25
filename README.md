@@ -26,8 +26,7 @@
   <img src="doc/images/polka.png" alt="Polka" width="640"/>
 </p>
 
-![Uploading Screencastfrom2026-07-2510-38-51-ezgif.com-optimize (2).gif…]()
-
+<img width="320" height="160" alt="Screencastfrom2026-07-2510-38-51-ezgif com-optimize (2)" src="https://github.com/user-attachments/assets/66b65b81-c373-4af6-aa05-a58d402779d7" />
 
 **Multi-LiDAR fusion node for ROS 2.** Merges any mix of PointCloud2 and LaserScan sources into a unified PointCloud2 and/or LaserScan, with per-source and output filtering, IMU deskewing, and optional CUDA acceleration. One composable node replaces a relay / filter / transform / merge / downsample chain.
 

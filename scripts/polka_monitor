@@ -626,6 +626,10 @@ class Dashboard:
 
 def main():
     args = parse_args()
+    # Require a real TTY (not a pipe) because curses needs direct terminal control.
+    # TERM describes the actual terminal's capability, not what we wish it to be.
+    # We emit only what the user's TERM+terminal combo can actually support.
+    # Users with broken colors should fix TERM in their shell config, not lie about it here.
     if not sys.stdout.isatty():
         sys.stderr.write(
             'polka_monitor: needs a terminal (run it from an interactive shell)\n')

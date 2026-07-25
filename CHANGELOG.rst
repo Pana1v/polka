@@ -2,13 +2,6 @@
 Changelog for package polka
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Forthcoming
------------
-* Add per-feature demo GIFs (multi-LiDAR fusion, output filters, angular invert, self-filter, voxel downsample, dual output, 2D scan merge) generated from the TIERS multi-LiDAR dataset with a headless Open3D + gifski toolchain.
-* Slim the README to badges, demo gallery, and quick start; move parameter and pipeline detail into ``doc/CONFIGURATION.md`` and ``doc/PIPELINE.md``.
-* Consolidate documentation assets (docs, images, demo media) under ``doc/``.
-* Remove the superseded ``pipeline_demo.gif``.
-
 0.5.0 (2026-07-25)
 ------------------
 * Add ``polka_monitor`` terminal diagnostics dashboard and ``dashboard`` launch arg.
@@ -20,7 +13,12 @@ Forthcoming
 * Detect rosbag/clock misconfiguration and expose ``use_sim_time``.
 * Per-point timestamp passthrough with a duplicate-timestamp guard.
 * Add Iron, Kilted, and Lyrical distro support with a per-distro CI build matrix.
+* Modular refactor of the node internals: headers reorganized into subdirectories, with the output path split into ``OutputPipeline`` and ``ScanBuilder``.
 * Behavior change: ``suppress_duplicate_timestamps`` and ``diagnostics.enabled`` now default to true.
+* Add per-feature demo GIFs (multi-LiDAR fusion, output filters, angular invert, self-filter, voxel downsample, dual output, 2D scan merge) generated from the TIERS multi-LiDAR dataset with a headless Open3D + gifski toolchain.
+* Slim the README to badges, demo gallery, and quick start; move parameter and pipeline detail into ``doc/CONFIGURATION.md`` and ``doc/PIPELINE.md``.
+* Consolidate documentation assets (docs, images, demo media) under ``doc/``.
+* Remove the superseded ``pipeline_demo.gif``.
 * ``example_params.yaml`` slimmed to a minimal example; full reference moved to ``config/detailed_params.yaml``.
 
 0.3.0 (2026-05-28)

@@ -256,18 +256,6 @@ def sparkline(values, width):
     return ''.join(chars)
 
 
-def source_capabilities(keys):
-    """Active-only capability summary: enabled filters plus deskew, or 'none'."""
-    active = [label for label, key in (
-        ('range', 'filter_range_enabled'),
-        ('angular', 'filter_angular_enabled'),
-        ('box', 'filter_box_enabled'),
-    ) if keys.get(key) == 'true']
-    if keys.get('deskew_active') == 'true':
-        active.append('deskew')
-    return ' '.join(active) if active else 'none'
-
-
 def source_entries(statuses):
     """Per-source display rows, sorted by name, with everything the cards need."""
     entries = []
@@ -285,7 +273,6 @@ def source_entries(statuses):
             'age': keys.get('msg_age_sec', '-'),
             'level': level,
             'reason': status.message,
-            'caps': source_capabilities(keys),
             'flags': {
                 'rng': keys.get('filter_range_enabled') == 'true',
                 'ang': keys.get('filter_angular_enabled') == 'true',
@@ -548,8 +535,8 @@ class Dashboard:
             self._put(stdscr, row, x0 + 3, '%-8s %-6s %-30s f:%s' % (
                 name[:8], e['type'], e['topic'][:30], e['frame']), attr, x1)
             row += 1
-            l2 = '   rate %5s Hz   bw %10s   lag %6s   caps %s' % (
-                _num(e['rate']), human_bw(e['bw']), _lag(e['age']), e['caps'])
+            l2 = '   rate %5s Hz   bw %10s   lag %6s' % (
+                _num(e['rate']), human_bw(e['bw']), _lag(e['age']))
             self._put(stdscr, row, x0, l2, attr, x1)
             row += 1
             if e['level'] != 0 and row <= bottom:

@@ -26,11 +26,8 @@
   <img src="doc/images/polka.png" alt="Polka" width="640"/>
 </p>
 
-<p align="center">
-  <img src="doc/media/gifs/fusion.gif" alt="Polka multi-LiDAR fusion" width="760"/>
-  <br/>
-  <em>Multi-LiDAR fusion: one spinning Ouster vs. Ouster + Livox Avia + Mid-360 merged into a single cloud.</em>
-</p>
+<img width="320" height="160" alt="Screencastfrom2026-07-2510-38-51-ezgif com-optimize" src="https://github.com/user-attachments/assets/2cc1fb00-3b4e-4144-aba6-7a4be0c27610" />
+3 Robosense Airy Lidars, voxelized and deskewed
 
 **Multi-LiDAR fusion node for ROS 2.** Merges any mix of PointCloud2 and LaserScan sources into a unified PointCloud2 and/or LaserScan, with per-source and output filtering, IMU deskewing, and optional CUDA acceleration. One composable node replaces a relay / filter / transform / merge / downsample chain.
 

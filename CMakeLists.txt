@@ -25,6 +25,16 @@ find_package(diagnostic_msgs REQUIRED)
 find_package(PCL REQUIRED COMPONENTS common filters)
 find_package(Eigen3 REQUIRED)
 
+# Not released for Iron (permanently EOL, never got a build - see MAINTAINING.md);
+# falls back to plain rclcpp PointCloud2 pub/sub there via POLKA_POINT_CLOUD_TRANSPORT_ENABLED.
+find_package(point_cloud_transport QUIET)
+if(point_cloud_transport_FOUND)
+  add_definitions(-DPOLKA_POINT_CLOUD_TRANSPORT_ENABLED)
+  message(STATUS "polka: point_cloud_transport found, PointCloud2 pub/sub uses it")
+else()
+  message(STATUS "polka: point_cloud_transport not found, falling back to plain rclcpp pub/sub")
+endif()
+
 option(WITH_CUDA "Enable CUDA acceleration" ON)
 if(WITH_CUDA)
   include(CheckLanguage)
@@ -75,6 +85,9 @@ if(COMMAND ament_target_dependencies)
     tf2_ros tf2_geometry_msgs tf2_eigen pcl_conversions laser_geometry
     diagnostic_msgs
   )
+  if(point_cloud_transport_FOUND)
+    ament_target_dependencies(polka_core point_cloud_transport)
+  endif()
 else()
   target_link_libraries(polka_core
     rclcpp::rclcpp
@@ -87,6 +100,9 @@ else()
     laser_geometry::laser_geometry
     ${diagnostic_msgs_TARGETS}
   )
+  if(point_cloud_transport_FOUND)
+    target_link_libraries(polka_core point_cloud_transport::point_cloud_transport)
+  endif()
   # pcl_conversions is header-only on some distros and exports no link target;
   # make sure its headers are on the include path regardless.
   target_include_directories(polka_core PUBLIC ${pcl_conversions_INCLUDE_DIRS})

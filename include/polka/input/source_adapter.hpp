@@ -29,6 +29,7 @@
 #include "polka/diag/stat_counters.hpp"
 #include "polka/input/imu_buffer.hpp"
 #include "polka/filters/i_filter.hpp"
+#include "polka/util/cloud_transport.hpp"
 #include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/msg/point_cloud2.hpp>
 #include <sensor_msgs/msg/laser_scan.hpp>
@@ -89,7 +90,7 @@ private:
   SourceConfig config_;
   rclcpp::Logger logger_;
 
-  rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr pc2_sub_;
+  CloudSubscriber pc2_sub_;
   rclcpp::Subscription<sensor_msgs::msg::LaserScan>::SharedPtr scan_sub_;
 
   std::shared_ptr<CloudT> buffer_;

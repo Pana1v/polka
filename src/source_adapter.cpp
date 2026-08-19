@@ -63,8 +63,8 @@ SourceAdapter::SourceAdapter(
 
   // Create subscription based on source type
   if (config.type == SourceType::POINTCLOUD2) {
-    pc2_sub_ = node_->create_subscription<sensor_msgs::msg::PointCloud2>(
-      config.topic, qos,
+    pc2_sub_ = create_cloud_subscription(
+      node_, config.topic, qos,
       std::bind(&SourceAdapter::pc2_callback, this, std::placeholders::_1));
   } else {
     scan_sub_ = node_->create_subscription<sensor_msgs::msg::LaserScan>(

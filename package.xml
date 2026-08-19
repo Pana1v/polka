@@ -24,6 +24,9 @@
   <depend>pcl_conversions</depend>
   <depend>laser_geometry</depend>
   <depend>diagnostic_msgs</depend>
+  <!-- Not released for Iron (permanently EOL, never got a build); polka falls back to
+       plain rclcpp PointCloud2 pub/sub there - see MAINTAINING.md and CMakeLists.txt. -->
+  <depend condition="$ROS_DISTRO != 'iron'">point_cloud_transport</depend>
 
   <exec_depend>rclpy</exec_depend>
   <exec_depend>rcl_interfaces</exec_depend>

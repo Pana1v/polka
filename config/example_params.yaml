@@ -12,6 +12,11 @@
 # Each source needs a valid TF from its frame_id -> output_frame_id.
 # Every parameter (per-source/output filters, IMU deskewing, QoS, per-point
 # timestamps, ...) is documented in config/detailed_params.yaml.
+#
+# IMU deskewing uses a single global motion_compensation.imu_topic by default
+# - the recommended setup for rigid platforms. Articulated platforms (hinged
+# vehicles, turrets, arms) can override sources.<name>.imu_topic per source;
+# see config/example_articulated_imu.yaml for a full example.
 # ============================================================================
 
 polka:

@@ -68,6 +68,13 @@ bool drift_params_equal(const DiagnosticsConfig & a, const DiagnosticsConfig & b
          a.rate_baseline_sec == b.rate_baseline_sec;
 }
 
+bool any_source_has_own_imu(const std::vector<SourceConfig> & sources)
+{
+  return std::any_of(
+    sources.begin(), sources.end(),
+    [](const SourceConfig & sc) {return !sc.imu_topic.empty();});
+}
+
 }  // namespace
 
 PolkaNode::PolkaNode(const rclcpp::NodeOptions & options)
@@ -107,9 +114,15 @@ PolkaNode::PolkaNode(const rclcpp::NodeOptions & options)
       this, config_.motion_compensation.imu_topic,
       config_.motion_compensation.imu_buffer_size);
   } else if (config_.motion_compensation.enabled) {
-    RCLCPP_WARN(
-      get_logger(),
-      "polka: motion compensation enabled but imu_topic is empty, deskewing will not activate");
+    if (any_source_has_own_imu(config_.sources)) {
+      RCLCPP_INFO(
+        get_logger(),
+        "polka: no global imu_topic; deskewing only sources with a per-source imu_topic");
+    } else {
+      RCLCPP_WARN(
+        get_logger(),
+        "polka: motion compensation enabled but imu_topic is empty, deskewing will not activate");
+    }
   }
 
   for (const auto & src_cfg : config_.sources) {
@@ -322,7 +335,8 @@ void PolkaNode::apply_reconfigure()
     changes.emplace_back("motion_compensation=off");
   }
   if (new_mc.enabled && new_mc.imu_topic.empty() &&
-    !(old_mc.enabled && old_mc.imu_topic.empty()))
+    !(old_mc.enabled && old_mc.imu_topic.empty()) &&
+    !any_source_has_own_imu(new_config.sources))
   {
     RCLCPP_WARN(
       get_logger(),

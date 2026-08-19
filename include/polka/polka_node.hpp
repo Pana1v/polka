@@ -35,6 +35,7 @@
 #include "polka/merge_engine/i_merge_engine.hpp"
 #include "polka/output/output_pipeline.hpp"
 #include "polka/output/scan_builder.hpp"
+#include "polka/util/cloud_transport.hpp"
 #include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/msg/point_cloud2.hpp>
 #include <sensor_msgs/msg/laser_scan.hpp>
@@ -115,7 +116,7 @@ private:
   ScanBuilder scan_builder_;
 
   // Output
-  rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr cloud_pub_;
+  CloudPublisher cloud_pub_;
   rclcpp::Publisher<sensor_msgs::msg::LaserScan>::SharedPtr scan_pub_;
   rclcpp::TimerBase::SharedPtr output_timer_;
 

@@ -26,6 +26,8 @@
   <img src="doc/images/polka.png" alt="Polka" width="640"/>
   
   <img width="400" height="200" alt="Screencastfrom2026-07-2510-38-51-ezgif com-optimize   (2)" src="https://github.com/user-attachments/assets/66b65b81-c373-4af6-aa05-a58d402779d7" />
+  <img width="880" height="433" alt="image" src="https://github.com/user-attachments/assets/a106e9d9-d31d-474e-ad82-1b3153ffb890" />
+
 
 </p>
   

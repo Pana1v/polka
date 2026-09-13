@@ -1,13 +1,16 @@
 # Demo media
 
-Per-feature demo GIFs in [`gifs/`](gifs/) and the headless toolchain that builds
+The per-feature demo GIFs in [`gifs/`](gifs/), and the headless toolchain that builds
 them. Source data is the [TIERS multi-LiDAR dataset](https://github.com/TIERS/multi_lidar_multi_uav_dataset)
-(Ouster OS1 + Livox Avia + Mid-360); clouds render with Open3D offscreen, panels
-compose with matplotlib, and GIFs encode with [gifski](https://gif.ski/).
+(Ouster OS1 + Livox Avia + Mid-360). Clouds render with Open3D offscreen, panels compose
+with matplotlib, GIFs encode with [gifski](https://gif.ski/).
 
 `work/` and `frames/` are generated intermediates and are gitignored.
 
-`gifs/deskew.gif` is the one exception to the toolchain below. It is a temporal trim (about t2.6 to t10.6 of the 39s clip) of `media/pipeline_demo.gif` on the `panav/viz/demo-generator` branch, cut with ffmpeg (a `trim` filter plus a two-pass palette), not produced by the scripts here. That clip shows a synthetic 1 rad/s yaw, so it is a mechanism demo, not a dataset capture.
+`gifs/deskew.gif` is the exception to all of this. It's a trim of `media/pipeline_demo.gif`
+on the `panav/viz/demo-generator` branch (about t2.6 to t10.6 of the 39s clip), cut with
+ffmpeg using a `trim` filter and a two-pass palette. The scripts here didn't make it. It
+shows a synthetic 1 rad/s yaw, so it demonstrates the mechanism rather than the dataset.
 
 ## Pipeline
 
@@ -37,6 +40,6 @@ python3 render_scan.py
 bash make_gifs.sh
 ```
 
-Extrinsics (sensor → `os_sensor` base frame) live in `demo_bringup.launch.py`,
-taken from the dataset README. The `cpu_vs_cuda` panel needs a working CUDA
-runtime; without it polka falls back to CPU and that panel is skipped.
+Extrinsics (sensor → `os_sensor` base frame) live in `demo_bringup.launch.py`, taken from
+the dataset README. The `cpu_vs_cuda` panel needs a working CUDA runtime; without one
+polka falls back to CPU and that panel gets skipped.

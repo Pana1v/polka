@@ -31,11 +31,11 @@
 
 </p>
   
-**Multi-LiDAR fusion node for ROS 2.** Merges any mix of PointCloud2 and LaserScan sources into a unified PointCloud2 and/or LaserScan, with per-source and output filtering, IMU deskewing, and optional CUDA acceleration. One composable node replaces a relay / filter / transform / merge / downsample chain.
+**Multi-LiDAR fusion node for ROS 2.** Takes any mix of PointCloud2 and LaserScan sources and publishes one merged PointCloud2, one merged LaserScan, or both. Filters per source and on the output, deskews with IMU data, and uses CUDA if you build it in. One node instead of a relay, filter, transform, merge and downsample chain.
 
 ## Features in action
 
-Each clip runs polka with a different config on the [TIERS multi-LiDAR dataset](https://github.com/TIERS/multi_lidar_multi_uav_dataset) (Ouster OS1 + Livox Avia + Mid-360), rendered headless with Open3D. See [`doc/media/`](doc/media/) to regenerate.
+Each clip is polka with a different config, run on the [TIERS multi-LiDAR dataset](https://github.com/TIERS/multi_lidar_multi_uav_dataset) (Ouster OS1 + Livox Avia + Mid-360) and rendered headless with Open3D. [`doc/media/`](doc/media/) has the scripts to regenerate them.
 
 <table>
 <tr>
@@ -62,7 +62,7 @@ Each clip runs polka with a different config on the [TIERS multi-LiDAR dataset](
 <p align="center">
   <img src="doc/media/gifs/deskew.gif" alt="per-point deskew: raw scan vs deskewed" width="560"/>
   <br/>
-  <em>Deskew: per-point SE(3) correction removes intra-scan motion smear (synthetic yaw, mechanism demo). This clip is synthetic, generated separately from the TIERS dataset clips above.</em>
+  <em>Deskew: per-point SE(3) correction removes intra-scan motion smear. Synthetic yaw, generated separately from the TIERS clips above.</em>
 </p>
 
 ## Performance
@@ -71,11 +71,11 @@ Each clip runs polka with a different config on the [TIERS multi-LiDAR dataset](
   <img src="doc/images/perf_summary.svg" alt="Polka 0.5.0 before and after performance summary" width="620"/>
 </p>
 
-**CUDA.** The GPU merge engine wins on heavy pipelines by fusing transform, filter, voxel, and scan flatten into a single pass over the points. On a filterless merge the CPU stays competitive, because kernel dispatch and host to device transfer overhead dominate when there is little per-point work to hide them behind. Build with `-DWITH_CUDA=ON` (it falls back to CPU automatically); it is not universally faster.
+**CUDA.** The GPU merge engine does transform, filter, voxel and scan flatten in one pass over the points, which pays off on heavy pipelines. On a filterless merge the CPU stays competitive — there is not enough per-point work to hide the kernel dispatch and the host-to-device copy. Build with `-DWITH_CUDA=ON` and it falls back to CPU on its own. It is not faster everywhere.
 
-**Bandwidth.** polka fans N sensor streams into one output topic, so every downstream node subscribes once instead of to each raw sensor. Voxel downsampling can thin that cloud further, a tradeoff the user sets through `leaf_size`: at the leaf size used in the demo clip it drops 69k points to 5k (about 14x), which is an example of the ratio, not a fixed figure or a 0.5.0 speedup.
+**Bandwidth.** polka turns N sensor streams into one topic, so downstream nodes subscribe once instead of once per sensor. Voxel downsampling thins that cloud further if you want it, by as much as you set with `leaf_size` — in the demo clip 69k points become 5k, but that is one leaf size, not a fixed ratio or a 0.5.0 speedup.
 
-See [Performance notes](doc/PERFORMANCE.md) for measurement context, the per number sources, and the CPU to CUDA crossover.
+[Performance notes](doc/PERFORMANCE.md) covers where the numbers come from and when CUDA stops paying off.
 
 ## Features
 
@@ -85,9 +85,9 @@ See [Performance notes](doc/PERFORMANCE.md) for measurement context, the per num
 - **IMU deskewing**: per-point SE(3) motion correction, with per-point timestamp auto-detect
 - **CUDA acceleration**: optional GPU merge engine, falls back to CPU
 - **TF2 integration**: automatic lookup with last-known-good fallback
-- **Full runtime reconfiguration**: filters, outputs, deskewing, and even the source list can be changed live via `ros2 param set` — no restart
-- **Diagnostics, drift detection, and a terminal dashboard**: per-source rate/bandwidth/lag on `/diagnostics`, timing/rate drift flags, and an optional `polka_monitor` TUI
-- **Composable node**: runs standalone or loaded into a component container
+- **Runtime reconfiguration**: filters, outputs, deskewing and the source list all change live via `ros2 param set`, no restart
+- **Diagnostics and a terminal dashboard**: per-source rate, bandwidth and lag on `/diagnostics`, drift flags, and an optional `polka_monitor` TUI
+- **Composable node**: runs standalone or in a component container
 
 ## Sensor and IMU support
 
@@ -100,7 +100,7 @@ See [Performance notes](doc/PERFORMANCE.md) for measurement context, the per num
 | Decentralized IMUs (different mounts) | yes | TF rotates angular velocity and acceleration into each sensor frame |
 | Articulated IMUs (moving joint or turret) | yes | dynamic TF from `joint_states`; `config/example_articulated_imu.yaml` |
 
-Every source can carry its own IMU on its own mount. polka looks up the live TF from each IMU frame to its sensor frame and rotates that IMU's angular velocity and acceleration into the sensor frame before deskewing, so a fixed chassis LiDAR and a rotating turret LiDAR each deskew against their own motion:
+Every source can have its own IMU on its own mount. polka looks up the live TF from each IMU frame to its sensor frame and rotates that IMU's angular velocity and acceleration into the sensor frame before deskewing, so a fixed chassis LiDAR and a rotating turret LiDAR each deskew against the motion they actually see:
 
 ```mermaid
 graph LR
@@ -113,7 +113,7 @@ graph LR
 
 ## Install
 
-Each ROS 2 distro has its own code-identical branch:
+One branch per ROS 2 distro, same code on each:
 
 | Distro | Ubuntu | Branch |
 |--------|--------|--------|
@@ -136,14 +136,14 @@ cp config/example_params.yaml config/my_robot.yaml      # edit topics + output_f
 ros2 launch polka polka.launch.py config_file:=config/my_robot.yaml
 ```
 
-Set `output_frame_id` to your base frame, list sensors under `source_names`, and make sure TF resolves each sensor `frame_id` to `output_frame_id`. Replaying a bag? Pass `use_sim_time:=true` and play with `--clock` (see [Configuration](doc/CONFIGURATION.md#rosbag--simulation-playback)).
+Point `output_frame_id` at your base frame, list your sensors under `source_names`, and check that TF resolves every sensor `frame_id` to `output_frame_id`. Playing a bag? Pass `use_sim_time:=true` and play with `--clock` (see [Configuration](doc/CONFIGURATION.md#rosbag--simulation-playback)).
 
 ## Documentation
 
-- **[Configuration](doc/CONFIGURATION.md)**: every parameter, filters, IMU deskewing, rosbag playback
-- **[Pipeline and architecture](doc/PIPELINE.md)**: what polka replaces, internal stages, file layout
-- **[Performance](doc/PERFORMANCE.md)**: measured 0.5.0 speedups, the CPU to CUDA crossover, and the bandwidth angle
-- **[Maintaining distro branches](MAINTAINING.md)**: single-source-of-truth sync across the five branches
+- **[Configuration](doc/CONFIGURATION.md)**: every parameter, filters, IMU deskewing, bag playback
+- **[Pipeline and architecture](doc/PIPELINE.md)**: what polka replaces, the internal stages, the file layout
+- **[Performance](doc/PERFORMANCE.md)**: the 0.5.0 numbers, the CPU/CUDA crossover, bandwidth
+- **[Maintaining distro branches](MAINTAINING.md)**: how the five branches stay in sync
 
 ## License and credits
 

@@ -1,44 +1,42 @@
 # Performance
 
-Two measured improvements shipped in 0.5.0. Only the published 0.5.0 numbers are quoted anywhere in this document, and each is listed with its source and with what it does and does not mean.
+Two things got measurably faster in 0.5.0. Those are the only numbers quoted here, and both come from the CHANGELOG.
 
-## Measured numbers
+| Change | Before | After | Factor |
+|---|---|---|---|
+| Deskew stage, per source | 9.8 ms | 1.6 ms | ~6.2x cheaper |
+| CPU angular filter, per tick at 259k points | 10.47 ms | 3.55 ms | ~3x cheaper |
 
-| Change | Before | After | Factor | Source |
-|---|---|---|---|---|
-| Deskew stage latency (per source) | 9.8 ms | 1.6 ms | ~6.2x cheaper | CHANGELOG 0.5.0 |
-| CPU angular filter (per tick, 259k pts) | 10.47 ms | 3.55 ms | ~3x cheaper | CHANGELOG 0.5.0 |
+The angular filter dropped its per-point `atan2` for a precomputed cross-product half-plane test. Deskew stopped recomputing a full SE(3) pose at every point and interpolates the rotation on a coarse stride instead, which costs about 1.6e-7 cm of accuracy at worst. Both are on the CPU path.
 
-Both figures are per-stage latency: the same computation, made faster by a code change in 0.5.0. Voxel downsampling is a different kind of thing, a data volume tradeoff covered under bandwidth below, not a code speedup, so it is not listed here.
+Voxel downsampling is not in that table. It trades resolution for data volume rather than doing the same work faster — see bandwidth below.
 
-The angular filter win comes from replacing a per-point `atan2` with a precomputed cross-product half-plane test; the deskew win comes from coarse-stride SE(3) rotation interpolation instead of recomputing the pose at every point (max error about 1.6e-7 cm). Both are on the CPU path.
+## Cheaper deskew is not straighter deskew
 
-## Two things "deskew" means
+Two different claims get mixed up here.
 
-These are separate claims. Keep them apart.
+The 6.2x is a cost number. It says the correction takes less time to compute, nothing more.
 
-**(a) The deskew computation got 6.2x cheaper.** This is a code optimization. Correcting every point used to recompute a full SE(3) pose per point; 0.5.0 interpolates the rotation on a coarse stride instead, cutting the stage from about 9.8 ms to about 1.6 ms per source with negligible accuracy loss. It makes the correction cheaper to run. It says nothing about how much distortion the correction removes.
+The quality side is separate. A LiDAR collects its points over a few tens of milliseconds, so if it rotates or translates during that sweep a rigid scan smears structure across the frame. Per-point SE(3) correction moves each point by the pose at its own timestamp and takes that smear out. `deskew.gif` in the README shows raw against deskewed under a synthetic 1 rad/s yaw. That clip is the quality claim; the 6.2x is the cost claim.
 
-**(b) The distortion that deskewing removes is a quality benefit.** A spinning or moving LiDAR samples its points across a few tens of milliseconds. If the sensor rotates or translates during that sweep, a rigid scan smears structure across the frame. Per-point SE(3) correction warps each point by the pose at its own timestamp and removes that intra-scan smear. The `deskew.gif` in the README shows exactly this: raw versus deskewed under a synthetic 1 rad/s yaw. This is what deskewing buys you.
+## CUDA is a crossover, not a free win
 
-Do not read the 6.2x as the size of the quality gain. 6.2x is how much faster the correction computes, not how much straighter the cloud looks. The gif is the quality claim; the 6.2x is the cost claim. They are unrelated magnitudes.
+Built with `-DWITH_CUDA=ON`, polka runs the whole per-point path — transform, filter, voxel, scan flatten — as one fused GPU pass.
 
-## CUDA: not universally faster
+When a lot of points go through several filters, that pass wins. On a filterless merge it usually doesn't: there is too little per-point work to hide kernel dispatch and the host-to-device copy, so the CPU keeps up. It falls back to CPU automatically when built without CUDA or when no device is present.
 
-polka can build a CUDA merge engine with `-DWITH_CUDA=ON` that runs the whole per-point path (transform, filter, voxel, scan flatten) as one fused GPU pass.
+No CUDA timings are published here. Measure it on your own pipeline.
 
-On heavy pipelines, where many points flow through several filters, that fused pass wins: the GPU hides per-point work that the CPU would pay for serially. On a filterless merge the CPU stays competitive: with little per-point work to do, kernel dispatch and host to device transfer overhead dominate, and the GPU has nothing to hide them behind.
+## Bandwidth
 
-So CUDA is a crossover, not a free win. It falls back to CPU automatically when built without CUDA or when no device is present. No CUDA timing number is published here; treat the choice as workload dependent and measure on your own pipeline.
+Merging saves traffic regardless of how fast the merge itself runs.
 
-## Bandwidth: N streams into one lighter topic
+- **N streams, one topic.** Downstream nodes subscribe once to the merged output instead of once per sensor. One frame, one QoS, one message to reason about.
+- **Voxel downsampling.** Not new in 0.5.0 and not a speedup — a resolution-for-bandwidth trade you set with `leaf_size`. At the leaf size used in the demo clip, 69k points come out as 5k. A bigger leaf thins more, a smaller one thins less.
+- **Slimmer messages.** A per-point timestamp field costs 8 bytes on every point. Deskewing needs it on the input; if nothing downstream needs it, publishing without it saves 8 bytes times the point count.
 
-Fusion is a bandwidth win independent of raw compute speed.
+## Regenerate the chart
 
-- **N streams to 1 topic.** Downstream nodes subscribe once to the merged output instead of to every raw sensor. One frame, one QoS, one message to reason about.
-- **Voxel downsampling.** This filter is not new in 0.5.0; it has always been available, and it is a quality and bandwidth tradeoff the user sets through `leaf_size`. At the leaf size chosen for the demo clip the cloud drops from 69k to 5k points (about 14x fewer), but that ratio is specific to that leaf size, not a fixed or guaranteed figure: a larger leaf thins more, a smaller leaf thins less. It is not a code speedup.
-- **Slimmer messages.** A per-point timestamp field costs 8 bytes on every point. Deskewing needs it on the input, but when downstream consumers do not, a cloud published without that field is smaller by 8 bytes times the point count.
-
-## Regenerate
-
-Regenerate: python3 doc/media/render_perf_summary.py
+```bash
+python3 doc/media/render_perf_summary.py
+```

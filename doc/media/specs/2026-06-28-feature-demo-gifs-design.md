@@ -6,15 +6,15 @@
 
 ## 1. Goal
 
-Produce **separate, high-quality animated GIFs, one per Polka feature**, generated
-from the TIERS multi-LiDAR `Calibration.bag` running the latest **Humble** Polka.
+One animated GIF per Polka feature, generated from the TIERS multi-LiDAR
+`Calibration.bag` running Polka on **Humble**.
 
-Each GIF runs **two or more Polka instances with different configs side-by-side in a
-divided panel** (the "multiple instances, one functionality each" idea), rendered with
-**Open3D offscreen** and encoded with **gifski**.
+Each GIF puts **two or more Polka instances with different configs side by side in a
+divided panel** — one functionality per instance — rendered with **Open3D offscreen**
+and encoded with **gifski**.
 
-This replaces the existing single low-quality montage (`media/pipeline_demo.gif`:
-560 px / 8 fps / 48 colors / matplotlib scatter) with per-feature, visually clean GIFs.
+These replace the single montage we have now (`media/pipeline_demo.gif`: 560 px, 8 fps,
+48 colors, matplotlib scatter), which is too low quality to read.
 
 ## 2. Input data
 
@@ -44,16 +44,16 @@ No IMU, no LaserScan, no TF in the bag. OS1 (Ouster) is the calibration base fra
 
 | Decision | Choice | Rationale |
 |---|---|---|
-| Renderer | **Open3D offscreen** | GPU-accurate, anti-aliased, full density, scriptable/headless. Verified working on RTX 2050 via EGL/Filament/OpenGL 4.6. |
-| Fusion scope | **3 LiDARs** (Ouster + Avia + Mid-360) | Clean, intuitive multi-LiDAR story. RealSense excluded (noisier, narrow FoV). |
-| Livox ingest | **Offline bag rewriter** | Avoids building two Livox driver msg packages + a live converter. |
+| Renderer | **Open3D offscreen** | Anti-aliased, full density, scriptable, headless. Verified on an RTX 2050 via EGL/Filament/OpenGL 4.6. |
+| Fusion scope | **3 LiDARs** (Ouster + Avia + Mid-360) | Reads clearly. RealSense left out — noisier, narrow FoV. |
+| Livox ingest | **Offline bag rewriter** | Saves building two Livox driver msg packages plus a live converter. |
 | Features | **All** (fusion, 4 separate filter GIFs, angular-invert, self-filter, voxel, CPU-vs-CUDA + perf, dual-output) | — |
-| Filter GIFs | **Separate GIF per filter** | Matches "one feature each" literally. |
-| Encoder | **gifski**, installed to `~/.local/bin` via `dpkg-deb -x` (no sudo) | Best GIF quality; consumes PNG frames directly, no ffmpeg needed for GIFs. |
-| Branch | **New branch off `origin/humble`** | Live branch (CI, 5-distro support). |
+| Filter GIFs | **Separate GIF per filter** | One feature each, literally. |
+| Encoder | **gifski**, installed to `~/.local/bin` via `dpkg-deb -x` (no sudo) | Best GIF quality, eats PNG frames directly, no ffmpeg needed. |
+| Branch | **New branch off `origin/humble`** | The live branch: CI, 5-distro support. |
 
-Out of scope: IMU-based deskew / motion compensation (no IMU in bag; bag is
-near-stationary calibration data). Heterogeneous 2D+3D fusion (no LaserScan source).
+Out of scope: IMU deskew and motion compensation (no IMU in the bag, and it's
+near-stationary calibration data), and mixed 2D+3D fusion (no LaserScan source).
 
 ## 4. Pipeline
 
@@ -76,11 +76,11 @@ Calibration.bag (ROS1, 1.32 GB, 9.3 s)
   with fields `x,y,z,intensity` (intensity = reflectivity), preserving `header.stamp`
   and `frame_id`. New topics `/avia/points`, `/mid360/points`.
 - **`media/render_o3d.py`** — replaces matplotlib `render_panels.py`. Open3D
-  `rendering.OffscreenRenderer`: shared camera per panel, dark studio background,
+  `rendering.OffscreenRenderer`: one shared camera per panel, dark background,
   height/intensity colormap, full point density, MSAA. Composites N tiles into one
-  divided-panel PNG per aligned frame. Multiprocessing over frames.
-- **`media/make_gifs.sh`** — installs gifski to `~/.local/bin` (extract `.deb` with
-  `dpkg-deb -x`, no sudo), then encodes each feature's PNG sequence into a separate
+  divided-panel PNG per aligned frame, multiprocessed over frames.
+- **`media/make_gifs.sh`** — installs gifski to `~/.local/bin` (`dpkg-deb -x` on the
+  `.deb`, no sudo), then encodes each feature's PNG sequence into its own
   `media/gifs/<feature>.gif` (palette-optimized, ~512–720 px, 15–20 fps).
 
 ### Ported from `panav/viz/demo-generator` (re-pointed at real topics)
@@ -117,26 +117,26 @@ Calibration.bag (ROS1, 1.32 GB, 9.3 s)
 - **Two distinct Livox custom types** (`livox_ros_driver` vs `livox_ros_driver2`) →
   handled by the offline rewriter using each connection's embedded msgdef; no driver
   package builds.
-- **9.3 s clip** → short; GIFs use the full clip (loop in viewer). Capture duration
-  capped at bag length.
+- **9.3 s clip** → short, so the GIFs use all of it and loop in the viewer. Capture
+  duration is capped at bag length.
 - **gifski not in apt, no cargo, no sudo** → prebuilt binary extracted to
   `~/.local/bin`. GIFs need only gifski (renderer emits PNGs). ffmpeg (apt, needs
   password) only if MP4s are also wanted — not a core deliverable.
 - **Open3D EGL device binding on hybrid GPU** → verified rendering a real frame
   headlessly; if a future run produces black frames, force the NVIDIA EGL device via
   `__EGL_VENDOR_LIBRARY_FILENAMES` / `__NV_PRIME_RENDER_OFFLOAD`.
-- **Camera intrinsics consistency across tiles** → `render_o3d.py` uses one fixed
-  camera pose/intrinsic for all tiles in a panel so side-by-side comparison is honest.
+- **Camera consistency across tiles** → `render_o3d.py` uses one fixed camera pose and
+  intrinsic for every tile in a panel, so the side-by-side comparison is honest.
 
 ## 8. Validation
 
 - **Smoke:** `livox_to_pc2.py` on a 1 s slice → assert non-empty `PointCloud2`, correct
   `frame_id`, plausible point counts vs `CustomMsg.point_num`.
-- **Fusion alignment:** with static TFs applied, the 3 merged clouds visually coincide
-  on shared structure (walls/targets) — the calibration's own success criterion.
-- **Per-feature sanity:** each capture's output point count moves in the expected
-  direction (filters reduce; voxel reduces; self-filter removes the chassis box; CPU
-  and CUDA outputs match within tolerance).
+- **Fusion alignment:** with the static TFs applied, the 3 merged clouds line up on
+  shared structure (walls, targets) — the calibration bag's own success criterion.
+- **Per-feature sanity:** each capture's output point count moves the way it should —
+  filters and voxel reduce it, self-filter removes the chassis box, CPU and CUDA
+  outputs match within tolerance.
 - **Render:** every panel produces ≥1 non-black PNG; frame count > 0 after stamp
   alignment.
 - **Encode:** each `media/gifs/*.gif` exists, non-trivial size, opens.

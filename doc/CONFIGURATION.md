@@ -1,6 +1,6 @@
 # Configuration
 
-All parameters live under the `polka` namespace. [`config/example_params.yaml`](../config/example_params.yaml) is a minimal starter; [`config/detailed_params.yaml`](../config/detailed_params.yaml) is the full annotated reference of every parameter.
+Every parameter lives under the `polka` namespace. [`config/example_params.yaml`](../config/example_params.yaml) is a minimal starting point; [`config/detailed_params.yaml`](../config/detailed_params.yaml) is the annotated reference with all of them.
 
 ## Minimal config
 
@@ -24,7 +24,7 @@ polka:
         enabled: true
 ```
 
-Everything else has sensible defaults. Add filters, deskewing, and GPU acceleration as needed.
+Everything else has a default. Add filters, deskewing and GPU acceleration when you need them.
 
 ## Key parameters
 
@@ -46,16 +46,16 @@ Everything else has sensible defaults. Add filters, deskewing, and GPU accelerat
 | `sources.<name>.qos_reliability` | `"best_effort"` | `"best_effort"` or `"reliable"` |
 | `sources.<name>.qos_history_depth` | `1` | QoS queue depth |
 
-> Tip: large clouds (e.g. a 64-beam spinning lidar) can be dropped under `best_effort` when the executor is busy. Use `"reliable"` with a depth of `10` for those sources.
+> Big clouds (a 64-beam spinning lidar, say) get dropped under `best_effort` when the executor is busy. Use `"reliable"` with a depth of `10` for those sources.
 
 ## Output filters
 
-Applied to the merged cloud before publishing, in this order:
+These run on the merged cloud before it is published, in this order:
 
 1. **Output filters** (range, angular, box)
-2. **Footprint filter**: removes points inside robot-body exclusion zones
+2. **Footprint filter**: drops points inside the robot-body exclusion zones
 3. **Height filter**: clips to `[z_min, z_max]`
-4. **Voxel downsample**: reduces density via VoxelGrid
+4. **Voxel downsample**: thins density with a VoxelGrid
 
 ```yaml
 outputs:
@@ -79,11 +79,11 @@ outputs:
         z_max:  0.50
 ```
 
-> Note: any positive voxel `leaf_size` enables voxel downsampling, even with `enabled: false`. Leave `leaf_size` at `0.0` (or omit it) when you do not want voxelization.
+> Any positive voxel `leaf_size` turns voxel downsampling on, even with `enabled: false`. Leave `leaf_size` at `0.0` (or drop it) if you don't want voxelization.
 
 ## Motion compensation (IMU deskewing)
 
-Corrects for robot motion during a LiDAR scan using IMU data. Per-point deskewing uses the SE(3) exponential map motion model with angular velocity and linear acceleration from the IMU, applied to each point by its per-point timestamp. Inter-source alignment corrects for timing offsets between sensors. The motion model is inspired by [rko_lio](https://github.com/TixiaoShan/rko_lio) (Malladi et al., 2025).
+Corrects for the robot moving while a LiDAR scan is being collected. Per-point deskewing runs an SE(3) exponential-map motion model off the IMU's angular velocity and linear acceleration, applied to each point by that point's own timestamp. Inter-source alignment handles timing offsets between sensors. The motion model is inspired by [rko_lio](https://github.com/PRBonn/rko_lio) (Malladi et al., 2025).
 
 ```yaml
 motion_compensation:
@@ -95,13 +95,13 @@ motion_compensation:
   deskew_timestamp_field: "auto"  # auto-detects 'time', 't', 'timestamp', etc.
 ```
 
-**Per-point timestamp auto-detect.** With `deskew_timestamp_field: "auto"`, polka scans each `PointCloud2` for one of: `time`, `t`, `timestamp`, `time_stamp`, `offset_time`, `timeStamp`. Set a specific name if your driver differs; if no usable field is present, polka logs once and falls back to whole-scan deskewing for that source.
+**Per-point timestamp auto-detect.** With `deskew_timestamp_field: "auto"`, polka checks each `PointCloud2` for one of `time`, `t`, `timestamp`, `time_stamp`, `offset_time`, `timeStamp`. Name the field yourself if your driver calls it something else. If there is no usable field, polka logs once and falls back to whole-scan deskewing for that source.
 
-**Gravity subtraction.** Gravity is subtracted from `linear_acceleration` only when the IMU publishes a valid orientation (`orientation_covariance[0] >= 0` and a non-degenerate quaternion). Otherwise acceleration is zeroed and deskewing is rotation-only: still useful, but translation during the scan is not corrected.
+**Gravity subtraction.** Gravity comes out of `linear_acceleration` only when the IMU publishes a valid orientation (`orientation_covariance[0] >= 0` and a non-degenerate quaternion). Otherwise acceleration is zeroed and deskewing is rotation-only, which still helps, but translation during the scan goes uncorrected.
 
 ### Per-source IMU override
 
-Articulated platforms (hinged vehicles, manipulators, humanoids, rotating turrets) can override the IMU per source: each moving sensor reads an IMU rigidly mounted to its moving body, while fixed sensors share the global platform IMU. polka uses TF to rotate both angular velocity and linear acceleration from the IMU frame into each sensor frame, so `robot_state_publisher` must keep the IMU-to-sensor transform current. A dynamic transform (e.g. driven by joint_states from a turret encoder) works out of the box.
+On articulated platforms — hinged vehicles, manipulators, humanoids, rotating turrets — each moving sensor can read an IMU bolted to its own moving body while the fixed sensors share the platform IMU. polka uses TF to rotate both angular velocity and linear acceleration from the IMU frame into each sensor frame, so `robot_state_publisher` has to keep the IMU-to-sensor transform current. A dynamic transform, driven by joint_states from a turret encoder for instance, works as is.
 
 ```yaml
 motion_compensation:
@@ -117,13 +117,13 @@ sources:
     # imu_topic omitted, falls back to /imu/data
 ```
 
-A working two-source setup is in [`config/example_articulated_imu.yaml`](../config/example_articulated_imu.yaml). The global `motion_compensation.imu_topic` remains the recommended path for fully rigid platforms.
+[`config/example_articulated_imu.yaml`](../config/example_articulated_imu.yaml) has a working two-source setup. On a fully rigid platform, stick with the global `motion_compensation.imu_topic`.
 
 ## Rosbag / simulation playback
 
-The default configuration targets **live sensor data** on the system (wall) clock. The `source_timeout` staleness check compares each message's header stamp against the node clock, so a replayed bag (whose stamps are historical) makes every source look stale and **nothing is published**. Most people hit this the first time they test with a bag.
+The defaults assume live sensors on the wall clock. The `source_timeout` staleness check compares each message's header stamp against the node clock, so replaying a bag — whose stamps are from whenever it was recorded — makes every source look stale and **nothing gets published**. Almost everyone hits this the first time they test against a bag.
 
-Enable simulated time and play the bag with `--clock` so the node clock tracks bag time:
+Turn on simulated time and play the bag with `--clock` so the node clock follows bag time:
 
 ```bash
 ros2 launch polka polka.launch.py use_sim_time:=true
@@ -132,9 +132,9 @@ ros2 bag play <bag> --clock
 
 | Argument | Default | Description |
 |---|---|---|
-| `use_sim_time` | `false` | Set `true` for rosbag/simulation replay; the node then uses ROS time driven by `/clock`. |
+| `use_sim_time` | `false` | Set `true` for bag or simulation replay; the node then uses ROS time driven by `/clock`. |
 
-If polka detects a clock/timestamp mismatch it prints one actionable warning naming the fix:
+When polka spots a clock/timestamp mismatch it prints one warning that names the fix:
 
-- Bag stamps far behind the system clock (`use_sim_time` left `false`): set `use_sim_time:=true` and play with `--clock`.
-- `use_sim_time:=true` but nothing publishes `/clock`: add `--clock`. (The clock is frozen otherwise, so clouds may still flow on an undefined stamp. Always pass `--clock` for correct timing.)
+- Bag stamps far behind the system clock, `use_sim_time` left `false`: set `use_sim_time:=true` and play with `--clock`.
+- `use_sim_time:=true` but nothing is publishing `/clock`: add `--clock`. The clock is frozen without it, so clouds may still flow but on an undefined stamp. Always pass `--clock`.

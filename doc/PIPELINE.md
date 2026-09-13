@@ -1,6 +1,6 @@
 # Pipeline and architecture
 
-polka collapses a multi-node fusion chain into one composable node, cutting latency, CPU overhead, and configuration complexity. Managing several LiDARs in ROS 2 normally means a chain of separate nodes, each adding overhead, latency, and a failure point.
+Running several LiDARs in ROS 2 normally takes a chain of nodes: one to concatenate, one to filter, one per scan projection, another to merge those. Every hop costs latency and CPU, and every hop is one more thing to configure and one more thing that can die. polka does the whole chain in a single composable node.
 
 ## What polka replaces
 
@@ -102,18 +102,18 @@ graph LR
     VX --> OUT_LS[LaserScan]
 ```
 
-Each source is filtered in its own frame before the merge, so irrelevant data is dropped early. The merge engine (CPU or CUDA) transforms every source into `output_frame_id` and concatenates. The output pipeline then applies the shared filters, height cap, footprint exclusion, and voxel downsample in a fixed order before publishing the cloud and/or the flattened scan.
+Each source is filtered in its own frame before the merge, so points you don't want are gone before they cost anything. The merge engine, CPU or CUDA, transforms every source into `output_frame_id` and concatenates. The output stage then runs the shared filters, height cap, footprint exclusion and voxel downsample in that fixed order, and publishes the cloud, the flattened scan, or both.
 
 ## File structure
 
 ```
 polka/
 ├── config/
-│   ├── example_params.yaml           # Minimal starter config
-│   ├── detailed_params.yaml          # Full annotated parameter reference
+│   ├── example_params.yaml           # Minimal starting point
+│   ├── detailed_params.yaml          # Annotated reference for every parameter
 │   └── example_articulated_imu.yaml  # Per-source IMU deskewing example
 ├── launch/polka.launch.py            # Launch file
-├── doc/                              # docs + assets, one folder
+├── doc/                              # docs and assets
 │   ├── CONFIGURATION.md
 │   ├── PIPELINE.md
 │   ├── images/polka.png              # logo
@@ -123,11 +123,11 @@ polka/
 │   ├── types.hpp                     # Config structs and type definitions
 │   ├── config/config_loader.hpp      # Parameter loading and hot-reload
 │   ├── input/
-│   │   ├── source_adapter.hpp        # Subscribes to and converts sensor data
+│   │   ├── source_adapter.hpp        # Subscribes and converts incoming sensor data
 │   │   └── imu_buffer.hpp            # IMU ring buffer with atomic snapshot
 │   ├── filters/
 │   │   ├── i_filter.hpp              # Filter interface
-│   │   ├── filter_chain.hpp          # Factory: build a filter chain from FilterParams
+│   │   ├── filter_chain.hpp          # Builds a filter chain from FilterParams
 │   │   ├── range_filter.hpp          # Min/max distance filter
 │   │   ├── angular_filter.hpp        # Angular sector filter
 │   │   └── box_filter.hpp            # Axis-aligned box filter (invert for self filter)
@@ -137,8 +137,8 @@ polka/
 │   │   ├── cuda_merge_engine.hpp     # CUDA GPU merge implementation
 │   │   └── cuda_types.cuh            # GPU type definitions
 │   ├── output/
-│   │   ├── output_pipeline.hpp       # Post-merge processing (filter, height cap, voxel)
-│   │   └── scan_builder.hpp          # LaserScan assembly from cloud or range vector
+│   │   ├── output_pipeline.hpp       # Post-merge work (filter, height cap, voxel)
+│   │   └── scan_builder.hpp          # Builds a LaserScan from a cloud or a range vector
 │   └── util/
 │       ├── qos_builder.hpp           # build_qos() for output publishers
 │       ├── se3_exp.hpp               # SE(3) exponential map for motion compensation

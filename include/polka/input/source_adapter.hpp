@@ -28,6 +28,7 @@
 #include "polka/types.hpp"
 #include "polka/diag/stat_counters.hpp"
 #include "polka/input/imu_buffer.hpp"
+#include "polka/input/point_time_decoder.hpp"
 #include "polka/filters/i_filter.hpp"
 #include "polka/util/cloud_transport.hpp"
 #include <rclcpp/rclcpp.hpp>
@@ -79,7 +80,6 @@ private:
 
   // Per-point deskewing
   void detect_timestamp_field(const sensor_msgs::msg::PointCloud2 & msg);
-  double extract_point_time(const uint8_t * point_data) const;
   // Fill each point's 'time' field with its absolute acquisition time (Unix sec).
   void populate_point_time(CloudT & cloud, const sensor_msgs::msg::PointCloud2 & raw_msg);
   void deskew_cloud(
@@ -116,8 +116,7 @@ private:
   std::string timestamp_field_hint_{"auto"};
   bool timestamp_field_detected_{false};
   bool has_timestamp_field_{false};
-  uint32_t timestamp_field_offset_{0};
-  uint8_t timestamp_field_datatype_{0};  // FLOAT32 or FLOAT64
+  PointTimeDecoder decoder_;
 
   // Per-source IMU (when configured) and TF for frame rotation
   std::shared_ptr<ImuBuffer> local_imu_;

@@ -147,6 +147,8 @@ if(BUILD_TESTING)
       test_drift_tracker
       test_stat_counters
       test_config_preview
+      test_ouster_timestamps
+      test_point_time_decoder
       test_runtime_reconfigure)
     ament_add_gtest(${test_name} test/${test_name}.cpp)
     target_link_libraries(${test_name} polka_core)

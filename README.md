@@ -73,6 +73,8 @@ Each clip is polka with a different config, run on the [TIERS multi-LiDAR datase
 </p>
 
 **CUDA.** The GPU merge engine does transform, filter, voxel and scan flatten in one pass over the points, which pays off on heavy pipelines. On a filterless merge the CPU stays competitive — there is not enough per-point work to hide the kernel dispatch and the host-to-device copy. Build with `-DWITH_CUDA=ON` and it falls back to CPU on its own. It is not faster everywhere.
+Any binary package installed with `apt` is CPU-only: the ROS build farm has no CUDA toolchain,
+so the GPU engine is compiled out there. Build from source to get it.
 
 **Bandwidth.** polka turns N sensor streams into one topic, so downstream nodes subscribe once instead of once per sensor. Voxel downsampling thins that cloud further if you want it, by as much as you set with `leaf_size` — in the demo clip 69k points become 5k, but that is one leaf size, not a fixed ratio or a 0.5.0 speedup.
 

@@ -97,6 +97,20 @@ motion_compensation:
 
 **Per-point timestamp auto-detect.** With `deskew_timestamp_field: "auto"`, polka checks each `PointCloud2` for one of `time`, `t`, `timestamp`, `time_stamp`, `offset_time`, `timeStamp`. Name the field yourself if your driver calls it something else. If there is no usable field, polka logs once and falls back to whole-scan deskewing for that source.
 
+**Units and epoch come from the field's datatype**, not from the size of the value:
+
+| Datatype | Meaning | Typical sensor |
+| --- | --- | --- |
+| `UINT32` | nanosecond offset from `header.stamp` | Ouster (`t`) |
+| `FLOAT32` | second offset from `header.stamp` | Velodyne (`time`) |
+| `FLOAT64` | absolute Unix seconds above 1e8, otherwise a second offset | RoboSense / Hesai (`timestamp`) |
+
+An integer field is always a nanosecond offset, since no driver packs absolute time into one, so there is nothing to guess. `FLOAT64` is the only ambiguous case and the only one still decided by magnitude. Setting `deskew_timestamp_field` overrides the field *name* only; it cannot change how a datatype is interpreted.
+
+Sources whose time field is `FLOAT64` nanoseconds are not supported. If you have one, [rko_lio's `process_timestamps.cpp`](https://github.com/PRBonn/rko_lio) resolves units and epoch independently and is the design to follow.
+
+**Plausibility guard.** On the first message from a source, polka checks that the decoded per-point times land within 10 s of the header stamp. Beyond that the units or epoch have been misread, and deskewing on such values would scatter points across the map, so polka logs a warning naming the field, the datatype and the observed `max|dt|`, then runs that source without per-point timestamps. The bound is not a scan-duration limit: a unit misread is off by a factor of a thousand or more, so 10 s leaves ample room for slow aggregated frames while still catching the real failure.
+
 **Gravity subtraction.** Gravity comes out of `linear_acceleration` only when the IMU publishes a valid orientation (`orientation_covariance[0] >= 0` and a non-degenerate quaternion). Otherwise acceleration is zeroed and deskewing is rotation-only, which still helps, but translation during the scan goes uncorrected.
 
 ### Per-source IMU override

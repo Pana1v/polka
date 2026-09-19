@@ -31,7 +31,16 @@ namespace
 // Rotation-only deskew fast path: exact-compute the per-point rotation every this
 // many points, linearly interpolate the rest. See deskew_cloud() for the error bound.
 constexpr size_t kDeskewInterpStride = 16;
+
+// True when 'data' actually holds every point the message claims, so walking it
+// by point_step cannot run off the end. Every raw-byte read of the per-point time
+// field is gated on this.
+bool payload_indexable(const sensor_msgs::msg::PointCloud2 & msg)
+{
+  const size_t n = static_cast<size_t>(msg.width) * msg.height;
+  return msg.point_step > 0 && msg.data.size() >= n * msg.point_step;
 }
+}  // namespace
 
 SourceAdapter::SourceAdapter(
   rclcpp::Node * node, const SourceConfig & config, bool gpu_filters,
@@ -121,55 +130,49 @@ void SourceAdapter::detect_timestamp_field(const sensor_msgs::msg::PointCloud2 &
   timestamp_field_detected_ = true;
   has_timestamp_field_ = false;
 
-  // Known per-point timestamp field names (priority order)
-  static const std::vector<std::string> known_names = {
-    "time", "t", "timestamp", "time_stamp", "offset_time", "timeStamp"
-  };
+  std::string matched_name;
+  const auto decoder = detect_point_time_field(msg.fields, timestamp_field_hint_, &matched_name);
 
-  std::vector<std::string> candidates;
-  if (timestamp_field_hint_ != "auto") {
-    candidates.push_back(timestamp_field_hint_);
-  } else {
-    candidates = known_names;
+  if (!decoder) {
+    RCLCPP_INFO(
+      logger_,
+      "polka: source '%s' has no per-point timestamp field, per-point deskewing disabled",
+      config_.name.c_str());
+    return;
   }
 
-  for (const auto & field : msg.fields) {
-    for (const auto & name : candidates) {
-      if (field.name == name) {
-        if (field.datatype == sensor_msgs::msg::PointField::FLOAT32 ||
-          field.datatype == sensor_msgs::msg::PointField::FLOAT64)
-        {
-          has_timestamp_field_ = true;
-          timestamp_field_offset_ = field.offset;
-          timestamp_field_datatype_ = field.datatype;
-          RCLCPP_INFO(
-            logger_,
-            "polka: source '%s' detected per-point timestamp field '%s' (offset=%u, %s)",
-            config_.name.c_str(), field.name.c_str(), field.offset,
-            field.datatype == sensor_msgs::msg::PointField::FLOAT64 ? "FLOAT64" : "FLOAT32");
-          return;
-        }
-      }
-    }
+  // Boundary check: a driver we guessed wrong about produces dt values orders of
+  // magnitude too large. Deskewing on those would fling points across the map, so
+  // refuse the field instead. Only meaningful for the float paths - a UINT32 ns
+  // field is capped by its own type at 4.295 s.
+  const size_t n = static_cast<size_t>(msg.width) * msg.height;
+  const double header_sec = rclcpp::Time(msg.header.stamp).seconds();
+
+  const double max_abs_dt = payload_indexable(msg) ?
+    point_time_max_abs_dt(*decoder, msg.data.data(), msg.point_step, n, header_sec) :
+    0.0;
+
+  if (max_abs_dt > kMaxPlausibleAbsDtSec) {
+    RCLCPP_WARN(
+      logger_,
+      "polka: source '%s' per-point timestamp field '%s' (%s) decodes to "
+      "max|dt| = %.3f s, over the %.1f s plausibility bound (header %.6f s). "
+      "Units or epoch are misread - per-point deskewing and timestamp "
+      "passthrough disabled for this source.",
+      config_.name.c_str(), matched_name.c_str(),
+      point_time_datatype_name(decoder->datatype),
+      max_abs_dt, kMaxPlausibleAbsDtSec, header_sec);
+    return;
   }
+
+  decoder_ = *decoder;
+  has_timestamp_field_ = true;
 
   RCLCPP_INFO(
     logger_,
-    "polka: source '%s' has no per-point timestamp field, per-point deskewing disabled",
-    config_.name.c_str());
-}
-
-double SourceAdapter::extract_point_time(const uint8_t * point_data) const
-{
-  if (timestamp_field_datatype_ == sensor_msgs::msg::PointField::FLOAT64) {
-    double val;
-    std::memcpy(&val, point_data + timestamp_field_offset_, sizeof(double));
-    return val;
-  } else {
-    float val;
-    std::memcpy(&val, point_data + timestamp_field_offset_, sizeof(float));
-    return static_cast<double>(val);
-  }
+    "polka: source '%s' detected per-point timestamp field '%s' (offset=%u, %s)",
+    config_.name.c_str(), matched_name.c_str(), decoder_.offset,
+    point_time_datatype_name(decoder_.datatype));
 }
 
 void SourceAdapter::populate_point_time(
@@ -182,7 +185,8 @@ void SourceAdapter::populate_point_time(
   // No per-point field (or layout we cannot index safely): every point inherits
   // the message header stamp. Same fallback used for projected LaserScan sources.
   if (!has_timestamp_field_ ||
-    n != static_cast<size_t>(raw_msg.width) * raw_msg.height)
+    n != static_cast<size_t>(raw_msg.width) * raw_msg.height ||
+    !payload_indexable(raw_msg))
   {
     for (size_t i = 0; i < n; ++i) {
       cloud[i].time = header_sec;
@@ -194,10 +198,7 @@ void SourceAdapter::populate_point_time(
   const uint32_t point_step = raw_msg.point_step;
 
   for (size_t i = 0; i < n; ++i) {
-    double pt_time = extract_point_time(raw_data + i * point_step);
-    // Interpret like the deskew path: values >1e8 are already absolute Unix
-    // seconds; smaller values are per-point offsets from the scan header stamp.
-    cloud[i].time = (pt_time > 1e8) ? pt_time : (header_sec + pt_time);
+    cloud[i].time = header_sec + decoder_.dt(raw_data + i * point_step, header_sec);
   }
 }
 
@@ -207,7 +208,11 @@ void SourceAdapter::deskew_cloud(
   const AveragedImu & imu)
 {
   size_t n = cloud.size();
-  if (n == 0 || n != static_cast<size_t>(raw_msg.width) * raw_msg.height) {return;}
+  if (n == 0 || n != static_cast<size_t>(raw_msg.width) * raw_msg.height ||
+    !payload_indexable(raw_msg))
+  {
+    return;
+  }
 
   // Rotate IMU data from IMU frame into sensor frame (identity if same frame or TF unavailable)
   Eigen::Matrix3d R_imu_to_sensor = Eigen::Matrix3d::Identity();
@@ -247,8 +252,7 @@ void SourceAdapter::deskew_cloud(
     bool have_anchor = false;
 
     for (size_t i = 0; i < n; ++i) {
-      double pt_time = extract_point_time(raw_data + i * point_step);
-      double dt = (pt_time > 1e8) ? (pt_time - header_sec) : pt_time;
+      const double dt = decoder_.dt(raw_data + i * point_step, header_sec);
       if (std::abs(dt) < 1e-9) {continue;}
 
       const double theta = -omega_mag * dt;
@@ -275,11 +279,7 @@ void SourceAdapter::deskew_cloud(
   // Fallback: exact per-point SE(3) computation. Used when translation is active
   // (an IMU with usable orientation) or rotation is negligible for this scan.
   for (size_t i = 0; i < n; ++i) {
-    double pt_time = extract_point_time(raw_data + i * point_step);
-
-    // Interpret: if >1e8 it's absolute Unix time, otherwise relative offset from scan start
-    double dt = (pt_time > 1e8) ? (pt_time - header_sec) : pt_time;
-
+    const double dt = decoder_.dt(raw_data + i * point_step, header_sec);
     if (std::abs(dt) < 1e-9) {continue;}
 
     Eigen::Isometry3d delta = compute_motion_delta(angular_vel, accel, dt);

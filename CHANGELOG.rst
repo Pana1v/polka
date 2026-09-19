@@ -2,6 +2,12 @@
 Changelog for package polka
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+Forthcoming
+-----------
+* Support Ouster-style per-point timestamps: a ``UINT32`` time field is now accepted and read as a nanosecond offset from ``header.stamp``. Previously the datatype was rejected outright, so Ouster sources ran with per-point deskewing and timestamp passthrough silently disabled.
+* Resolve per-point time units and epoch from the field's declared datatype instead of a value-magnitude test. The magnitude test now applies only to ``FLOAT64``, the one ambiguous case; RoboSense and Velodyne behavior is unchanged.
+* Reject per-point times that decode to more than 10 s from the header stamp, with a diagnostic warning, rather than deskewing on misread units.
+
 0.5.0 (2026-07-25)
 ------------------
 * Add ``polka_monitor`` terminal diagnostics dashboard and ``dashboard`` launch arg.

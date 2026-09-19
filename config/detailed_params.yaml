@@ -57,6 +57,10 @@ polka:
       per_point_deskew: true         # per-point correction within each scan
                                      # requires per-point timestamps in PointCloud2
                                      # (auto-detects 'time', 't', 'timestamp', etc.)
+                                     # units come from the field's datatype:
+                                     #   UINT32  -> nanosecond offset (Ouster)
+                                     #   FLOAT32 -> second offset    (Velodyne)
+                                     #   FLOAT64 -> absolute Unix s  (RoboSense)
       deskew_timestamp_field: "auto" # "auto" or specific field name (e.g. "time")
 
     # --------------------------------------------------

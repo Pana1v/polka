@@ -24,6 +24,18 @@
 
 #ifdef POLKA_POINT_CLOUD_TRANSPORT_ENABLED
 #include <point_cloud_transport/point_cloud_transport.hpp>
+#if __has_include(<point_cloud_transport/version.h>)
+#include <point_cloud_transport/version.h>
+#endif
+#endif
+
+// point_cloud_transport 5.2.2 added create_* overloads taking NodeInterfaces + rclcpp::QoS and
+// deprecated the shared_ptr<Node> + rmw_qos_profile_t ones; 6.0 (Rolling) removed the old ones.
+// Nested #if because an undefined function-like macro is a hard error inside #if.
+#ifdef POINT_CLOUD_TRANSPORT_VERSION_GTE
+#if POINT_CLOUD_TRANSPORT_VERSION_GTE(5, 2, 2)
+#define POLKA_PCT_NODE_INTERFACES_API
+#endif
 #endif
 
 namespace polka
@@ -42,7 +54,9 @@ using CloudSubscriber = rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::Sha
 inline CloudPublisher create_cloud_publisher(
   rclcpp::Node * node, const std::string & topic, const rclcpp::QoS & qos)
 {
-#ifdef POLKA_POINT_CLOUD_TRANSPORT_ENABLED
+#if defined(POLKA_PCT_NODE_INTERFACES_API)
+  return point_cloud_transport::create_publisher(*node, topic, qos);
+#elif defined(POLKA_POINT_CLOUD_TRANSPORT_ENABLED)
   // Non-owning alias: called before shared_from_this() is valid in the ctor.
   auto node_alias = std::shared_ptr<rclcpp::Node>(node, [](rclcpp::Node *) {});
   return point_cloud_transport::create_publisher(node_alias, topic, qos.get_rmw_qos_profile());
@@ -55,7 +69,9 @@ inline CloudSubscriber create_cloud_subscription(
   rclcpp::Node * node, const std::string & topic, const rclcpp::QoS & qos,
   std::function<void(sensor_msgs::msg::PointCloud2::ConstSharedPtr)> callback)
 {
-#ifdef POLKA_POINT_CLOUD_TRANSPORT_ENABLED
+#if defined(POLKA_PCT_NODE_INTERFACES_API)
+  return point_cloud_transport::create_subscription(*node, topic, callback, "raw", qos);
+#elif defined(POLKA_POINT_CLOUD_TRANSPORT_ENABLED)
   auto node_alias = std::shared_ptr<rclcpp::Node>(node, [](rclcpp::Node *) {});
   return point_cloud_transport::create_subscription(
     node_alias, topic, callback, "raw", qos.get_rmw_qos_profile());

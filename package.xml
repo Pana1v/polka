@@ -3,7 +3,7 @@
 <package format="3">
   <name>polka</name>
   <version>0.5.0</version>
-  <description>ROS2 composable node for multi-LiDAR fusion with optional CUDA acceleration.</description>
+  <description>ROS2 composable node for multi-LiDAR fusion with optional CUDA acceleration (binary packages are CPU-only; build from source with -DWITH_CUDA=ON for the GPU merge engine).</description>
   <maintainer email="praajarpit@gmail.com">Panav Arpit Raaj</maintainer>
   <license>Apache-2.0</license>
 
@@ -24,6 +24,12 @@
   <depend>pcl_conversions</depend>
   <depend>laser_geometry</depend>
   <depend>diagnostic_msgs</depend>
+  <!-- find_package'd directly in CMakeLists.txt. Both arrive transitively today - PCL via
+       pcl_conversions, Eigen via pcl_conversions, tf2_eigen and laser_geometry - but those
+       are dependency lists we do not control. Declare them so a change in any of them
+       cannot break the build farm. -->
+  <depend>libpcl-all-dev</depend>
+  <depend>eigen</depend>
   <!-- Not released for Iron (permanently EOL, never got a build); polka falls back to
        plain rclcpp PointCloud2 pub/sub there - see MAINTAINING.md and CMakeLists.txt. -->
   <depend condition="$ROS_DISTRO != 'iron'">point_cloud_transport</depend>

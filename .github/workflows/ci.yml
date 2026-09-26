@@ -14,7 +14,7 @@ on:
 
 jobs:
   build:
-    name: ${{ matrix.distro }}
+    name: ${{ matrix.distro }}${{ matrix.suffix }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -33,6 +33,17 @@ jobs:
             image: osrf/ros:lyrical-desktop
           - distro: rolling
             image: osrf/ros:rolling-desktop
+          # The -desktop images above pre-install most of the ROS tree, so they build against a
+          # far wider dependency set than the ROS build farm does. This row uses a minimal base
+          # where rosdep installs only what package.xml declares, plus whatever those pull in -
+          # the closest local approximation of a release build.
+          #
+          # It is not a complete undeclared-dependency check: anything a declared dependency
+          # happens to pull in still resolves here. PCL and Eigen, for instance, arrive via
+          # pcl_conversions whether or not polka declares them.
+          - distro: humble
+            image: ros:humble-ros-base
+            suffix: " (ros-base, minimal deps)"
     container:
       image: ${{ matrix.image }}
     steps:

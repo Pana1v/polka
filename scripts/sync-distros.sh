@@ -23,9 +23,9 @@ set -euo pipefail
 
 SOURCE="${SOURCE:-humble}"
 # Downstream branches to sync (everything except SOURCE).
-ALL_DISTROS=(humble iron jazzy kilted lyrical)
+ALL_DISTROS=(humble iron jazzy kilted lyrical rolling)
 # ROS distro used to build each branch.
-declare -A BUILD_DISTRO=( [humble]=humble [iron]=iron [jazzy]=jazzy [kilted]=kilted [lyrical]=lyrical )
+declare -A BUILD_DISTRO=( [humble]=humble [iron]=iron [jazzy]=jazzy [kilted]=kilted [lyrical]=lyrical [rolling]=rolling )
 
 DRY_RUN=0; DO_BUILD=1; DO_PUSH=1
 for arg in "$@"; do

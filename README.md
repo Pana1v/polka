@@ -6,6 +6,7 @@
   <a href="https://github.com/Pana1v/polka/tree/jazzy"><img src="https://img.shields.io/badge/ROS_2-Jazzy-22314E?logo=ros&logoColor=white" alt="ROS 2 Jazzy"/></a>
   <a href="https://github.com/Pana1v/polka/tree/kilted"><img src="https://img.shields.io/badge/ROS_2-Kilted-22314E?logo=ros&logoColor=white" alt="ROS 2 Kilted"/></a>
   <a href="https://github.com/Pana1v/polka/tree/lyrical"><img src="https://img.shields.io/badge/ROS_2-Lyrical-22314E?logo=ros&logoColor=white" alt="ROS 2 Lyrical"/></a>
+  <a href="https://github.com/Pana1v/polka/tree/rolling"><img src="https://img.shields.io/badge/ROS_2-Rolling-22314E?logo=ros&logoColor=white" alt="ROS 2 Rolling"/></a>
   <br/>
   <img src="https://img.shields.io/badge/Ubuntu-22.04-E95420?logo=ubuntu&logoColor=white" alt="Ubuntu 22.04"/>
   <img src="https://img.shields.io/badge/Ubuntu-24.04-E95420?logo=ubuntu&logoColor=white" alt="Ubuntu 24.04"/>
@@ -122,6 +123,7 @@ One branch per ROS 2 distro, same code on each:
 | Jazzy | 24.04 | [`jazzy`](../../tree/jazzy) |
 | Kilted | 24.04 | [`kilted`](../../tree/kilted) |
 | Lyrical | 26.04 | [`lyrical`](../../tree/lyrical) |
+| Rolling | 26.04 | [`rolling`](../../tree/rolling) |
 
 ```bash
 git clone -b humble https://github.com/Pana1v/polka.git ~/ros2_ws/src/polka
@@ -143,7 +145,7 @@ Point `output_frame_id` at your base frame, list your sensors under `source_name
 - **[Configuration](doc/CONFIGURATION.md)**: every parameter, filters, IMU deskewing, bag playback
 - **[Pipeline and architecture](doc/PIPELINE.md)**: what polka replaces, the internal stages, the file layout
 - **[Performance](doc/PERFORMANCE.md)**: the 0.5.0 numbers, the CPU/CUDA crossover, bandwidth
-- **[Maintaining distro branches](MAINTAINING.md)**: how the five branches stay in sync
+- **[Maintaining distro branches](MAINTAINING.md)**: how the six branches stay in sync
 
 ## License and credits
 

@@ -1,6 +1,6 @@
 # Maintaining polka across ROS 2 distros
 
-polka supports five ROS 2 distributions, one branch each:
+polka supports six ROS 2 distributions, one branch each:
 
 | Distro  | Codename  | Ubuntu | LTS | Branch    |
 |---------|-----------|--------|-----|-----------|
@@ -9,9 +9,10 @@ polka supports five ROS 2 distributions, one branch each:
 | Jazzy   | Jalisco   | 24.04  | yes | `jazzy`   |
 | Kilted  | Kaiju     | 24.04  | no  | `kilted`  |
 | Lyrical | Luth      | 26.04  | yes | `lyrical` |
+| Rolling | Ridley    | 26.04  | no  | `rolling` |
 
 The branches hold identical code on purpose. This document is about keeping them that
-way without doing the same work five times.
+way without doing the same work six times.
 
 ## One source of truth, fanned out
 
@@ -21,11 +22,11 @@ way without doing the same work five times.
                 ▼
             humble  ──────────────  source of truth (develop here)
                 │  scripts/sync-distros.sh   (merge → build-verify → push)
-    ┌───────────┼───────────┬───────────┬───────────┐
-    ▼           ▼           ▼           ▼           ▼
-  iron        jazzy       kilted      lyrical    (+humble)
- 22.04        24.04       24.04        26.04
-    └────────────  .github/workflows/ci.yml builds all 5 per push/PR  ───────────┘
+    ┌───────────┼───────────┬───────────┬───────────┬───────────┐
+    ▼           ▼           ▼           ▼           ▼           ▼
+  iron        jazzy       kilted      lyrical     rolling    (+humble)
+ 22.04        24.04       24.04        26.04       26.04
+    └────────────  .github/workflows/ci.yml builds all 6 per push/PR  ───────────────────────┘
 ```
 
 **Why develop on `humble`, the oldest distro?**
@@ -36,7 +37,7 @@ new-only API and break the older branches without noticing. So the oldest distro
 ## Day to day
 
 1. Branch off `humble`:  `git checkout humble && git checkout -b panav/feat/my-thing`
-2. Write and test it on Humble, then open a PR into `humble`. CI builds it on **all five** distros.
+2. Write and test it on Humble, then open a PR into `humble`. CI builds it on **all six** distros.
 3. Once it merges, fan it out:
    ```bash
    scripts/sync-distros.sh            # merge humble → iron/jazzy/kilted/lyrical, build, push
@@ -76,7 +77,7 @@ branches stay byte-identical, which keeps sync a trivial fast-forward:
 Reach for `__has_include`, `RCLCPP_VERSION_GTE(major, minor, patch)` or a CMake-provided
 `POLKA_ROS_DISTRO` define before you fork branch history.
 
-> polka still includes `<pcl_conversions/pcl_conversions.h>`, which resolves on all five
+> polka still includes `<pcl_conversions/pcl_conversions.h>`, which resolves on all six
 > distros. If a future distro moves it, wrap it in `__has_include` rather than letting
 > the branches diverge.
 
@@ -91,7 +92,7 @@ genuinely differ, which is the signal you want. Nothing is auto-resolved.
 ## CI
 
 [`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs a `fail-fast: false` matrix
-that builds and tests polka in `osrf/ros:<distro>-desktop` containers for all five
+that builds and tests polka in `osrf/ros:<distro>-desktop` containers for all six
 distros, on every push and PR. That's what catches a break on, say, Lyrical, whose
 `ament_target_dependencies()` removal is invisible to someone working on Humble
 (handled in `CMakeLists.txt` behind an `if(COMMAND ...)` guard).

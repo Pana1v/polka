@@ -7,9 +7,9 @@ name: CI
 
 on:
   push:
-    branches: [humble, iron, jazzy, kilted, lyrical]
+    branches: [humble, iron, jazzy, kilted, lyrical, rolling]
   pull_request:
-    branches: [humble, iron, jazzy, kilted, lyrical]
+    branches: [humble, iron, jazzy, kilted, lyrical, rolling]
   workflow_dispatch:
 
 jobs:
@@ -31,6 +31,8 @@ jobs:
             image: osrf/ros:kilted-desktop
           - distro: lyrical
             image: osrf/ros:lyrical-desktop
+          - distro: rolling
+            image: osrf/ros:rolling-desktop
     container:
       image: ${{ matrix.image }}
     steps:

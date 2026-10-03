@@ -248,9 +248,15 @@ void SourceAdapter::deskew_cloud(
   // time (dt may be negative): p_header = exp(dt * twist) * p. angular_vel is one
   // fixed snapshot for the whole scan, so every rotation shares one axis and its
   // signed angle is exactly linear in dt.
+  //
+  // Per-point math runs in float, like the points themselves: dt is formed in
+  // double first, so only small, well-conditioned values are narrowed. Float
+  // sin/cos is what makes this about 2x cheaper than double.
   const double omega_mag = angular_vel.norm();
-  const Eigen::Vector3d axis = omega_mag > kMinAngularRate ?
-    Eigen::Vector3d(angular_vel / omega_mag) : Eigen::Vector3d::UnitZ();
+  const Eigen::Vector3f axis = omega_mag > kMinAngularRate ?
+    Eigen::Vector3f((angular_vel / omega_mag).cast<float>()) : Eigen::Vector3f::UnitZ();
+  const float omega_f = static_cast<float>(omega_mag);
+  const Eigen::Vector3f half_accel = (0.5 * accel).cast<float>();
 
   // Translation under this model is 0.5 * a * dt^2. When that stays below a
   // millimetre over the whole scan (any ground robot: 0.2 m/s^2 over 0.1 s gives
@@ -266,22 +272,22 @@ void SourceAdapter::deskew_cloud(
     // anchor in between: R(t) p ~= R(t_a) (p + (t - t_a) k x p). Error is about
     // r * dtheta^2 / 2, so re-anchor whenever dtheta grows past kMaxInterpAngleRad
     // (0.2 mm at 100 m), e.g. at a ring boundary in ring-major clouds.
-    Eigen::Matrix3d R_anchor = Eigen::Matrix3d::Identity();
-    double theta_anchor = 0.0;
+    Eigen::Matrix3f R_anchor = Eigen::Matrix3f::Identity();
+    float theta_anchor = 0.0f;
     bool have_anchor = false;
 
     for (size_t i = 0; i < n; ++i) {
       const double dt = decoder_.dt(raw_data + i * point_step, header_sec);
       if (std::abs(dt) < 1e-9) {continue;}
 
-      const double theta = omega_mag * dt;
-      const Eigen::Vector3d p(cloud[i].x, cloud[i].y, cloud[i].z);
-      Eigen::Vector3d corrected;
+      const float theta = omega_f * static_cast<float>(dt);
+      const Eigen::Vector3f p(cloud[i].x, cloud[i].y, cloud[i].z);
+      Eigen::Vector3f corrected;
 
       const bool reanchor = !have_anchor || (i % kDeskewInterpStride) == 0 ||
         std::abs(theta - theta_anchor) > kMaxInterpAngleRad;
       if (reanchor) {
-        R_anchor = Eigen::AngleAxisd(theta, axis).toRotationMatrix();
+        R_anchor = Eigen::AngleAxisf(theta, axis).toRotationMatrix();
         theta_anchor = theta;
         have_anchor = true;
         corrected = R_anchor * p;
@@ -289,9 +295,9 @@ void SourceAdapter::deskew_cloud(
         corrected = R_anchor * (p + (theta - theta_anchor) * axis.cross(p));
       }
 
-      cloud[i].x = static_cast<float>(corrected.x());
-      cloud[i].y = static_cast<float>(corrected.y());
-      cloud[i].z = static_cast<float>(corrected.z());
+      cloud[i].x = corrected.x();
+      cloud[i].y = corrected.y();
+      cloud[i].z = corrected.z();
     }
     return;
   }
@@ -299,27 +305,31 @@ void SourceAdapter::deskew_cloud(
   // Full SE(3): R p + V rho about the fixed axis, in closed form (Rodrigues for R,
   // left Jacobian for V), with rho = 0.5 * a * dt^2. Same result as
   // compute_motion_delta(angular_vel, accel, dt) * p without building matrices.
+  // 1 - cos(theta) is taken as 2 sin^2(theta / 2) so small angles keep precision.
   for (size_t i = 0; i < n; ++i) {
     const double dt = decoder_.dt(raw_data + i * point_step, header_sec);
     if (std::abs(dt) < 1e-9) {continue;}
 
-    const Eigen::Vector3d p(cloud[i].x, cloud[i].y, cloud[i].z);
-    const Eigen::Vector3d rho = accel * (0.5 * dt * dt);
-    const double theta = omega_mag * dt;
-    Eigen::Vector3d corrected = p + rho;
+    const float dt_f = static_cast<float>(dt);
+    const Eigen::Vector3f p(cloud[i].x, cloud[i].y, cloud[i].z);
+    const Eigen::Vector3f rho = half_accel * (dt_f * dt_f);
+    const float theta = omega_f * dt_f;
+    Eigen::Vector3f corrected = p + rho;
 
     if (std::abs(theta) > kMinAngle) {
-      const double s = std::sin(theta);
-      const double one_minus_c = 1.0 - std::cos(theta);
-      const Eigen::Vector3d k_x_p = axis.cross(p);
-      const Eigen::Vector3d k_x_rho = axis.cross(rho);
+      const float sin_half = std::sin(0.5f * theta);
+      const float cos_half = std::cos(0.5f * theta);
+      const float s = 2.0f * sin_half * cos_half;
+      const float one_minus_c = 2.0f * sin_half * sin_half;
+      const Eigen::Vector3f k_x_p = axis.cross(p);
+      const Eigen::Vector3f k_x_rho = axis.cross(rho);
       corrected += s * k_x_p + one_minus_c * axis.cross(k_x_p) +
         (one_minus_c / theta) * k_x_rho + ((theta - s) / theta) * axis.cross(k_x_rho);
     }
 
-    cloud[i].x = static_cast<float>(corrected.x());
-    cloud[i].y = static_cast<float>(corrected.y());
-    cloud[i].z = static_cast<float>(corrected.z());
+    cloud[i].x = corrected.x();
+    cloud[i].y = corrected.y();
+    cloud[i].z = corrected.z();
   }
 }
 

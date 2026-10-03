@@ -237,6 +237,9 @@ void SourceAdapter::deskew_cloud(
   const uint8_t * raw_data = raw_msg.data.data();
   const uint32_t point_step = raw_msg.point_step;
 
+  // Each point moves by the sensor motion between header time and its own capture
+  // time (dt may be negative): p_header = delta(dt) * p, never its inverse.
+  //
   // Fast path: rotation-only (accel is exactly zeroed upstream whenever there is no
   // IMU orientation to subtract gravity with, i.e. no translation twist for this whole
   // scan) and a non-negligible angular rate. angular_vel is one fixed snapshot for the
@@ -255,7 +258,7 @@ void SourceAdapter::deskew_cloud(
       const double dt = decoder_.dt(raw_data + i * point_step, header_sec);
       if (std::abs(dt) < 1e-9) {continue;}
 
-      const double theta = -omega_mag * dt;
+      const double theta = omega_mag * dt;
       const Eigen::Vector3d p(cloud[i].x, cloud[i].y, cloud[i].z);
       Eigen::Vector3d corrected;
 
@@ -284,7 +287,7 @@ void SourceAdapter::deskew_cloud(
 
     Eigen::Isometry3d delta = compute_motion_delta(angular_vel, accel, dt);
     Eigen::Vector3d p(cloud[i].x, cloud[i].y, cloud[i].z);
-    Eigen::Vector3d corrected = delta.inverse() * p;
+    Eigen::Vector3d corrected = delta * p;
     cloud[i].x = static_cast<float>(corrected.x());
     cloud[i].y = static_cast<float>(corrected.y());
     cloud[i].z = static_cast<float>(corrected.z());

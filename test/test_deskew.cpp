@@ -32,6 +32,7 @@
 #include <vector>
 
 #include <rclcpp/rclcpp.hpp>
+#include <sensor_msgs/msg/imu.hpp>
 #include <sensor_msgs/msg/point_cloud2.hpp>
 #include <sensor_msgs/point_cloud2_iterator.hpp>
 
@@ -47,6 +48,9 @@ namespace
 {
 
 constexpr char kTopic[] = "/deskew_test_points";
+constexpr char kImuTopic[] = "/deskew_test_imu";
+constexpr double kImuRate = 400.0;     // Hz, Xsens-class
+constexpr double kGravity = 9.80665;
 constexpr size_t kPoints = 400;
 constexpr size_t kDensePoints = 8000;  // ~ a 16-ring lidar's share per 0.1 s
 constexpr size_t kRings = 8;
@@ -169,6 +173,58 @@ protected:
     return adapter.received() ? adapter.get_latest() : nullptr;
   }
 
+  // Same as deskew(), but through a real per-source ImuBuffer fed with an IMU
+  // stream: constant 'angular_vel' and 'accel' over [t_from, t_to] (relative to
+  // header), with the newest sample replaced by 'last_accel'.
+  CloudT::ConstPtr deskew_streamed(
+    const Scan & scan, const Eigen::Vector3d & angular_vel, const Eigen::Vector3d & accel,
+    double t_from, double t_to, const Eigen::Vector3d & last_accel)
+  {
+    SourceConfig cfg;
+    cfg.name = "test";
+    cfg.topic = kTopic;
+    cfg.imu_topic = kImuTopic;
+    cfg.qos_reliability = "reliable";
+    cfg.qos_history_depth = 5;
+
+    SourceAdapter adapter(node_.get(), cfg, false, nullptr, true, "auto");
+
+    // Level orientation, so polka removes exactly +g along z.
+    auto imu_pub = node_->create_publisher<sensor_msgs::msg::Imu>(
+      kImuTopic, rclcpp::SensorDataQoS().keep_last(1000));
+    const int samples = static_cast<int>((t_to - t_from) * kImuRate) + 1;
+    for (int k = 0; k < samples; ++k) {
+      sensor_msgs::msg::Imu imu;
+      imu.header.stamp = kHeaderStamp + rclcpp::Duration::from_seconds(t_from + k / kImuRate);
+      imu.orientation.w = 1.0;
+      imu.orientation_covariance[0] = 0.0;
+      const Eigen::Vector3d a = (k == samples - 1 ? last_accel : accel) +
+        Eigen::Vector3d(0.0, 0.0, kGravity);
+      imu.linear_acceleration.x = a.x();
+      imu.linear_acceleration.y = a.y();
+      imu.linear_acceleration.z = a.z();
+      imu.angular_velocity.x = angular_vel.x();
+      imu.angular_velocity.y = angular_vel.y();
+      imu.angular_velocity.z = angular_vel.z();
+      imu_pub->publish(imu);
+      exec_.spin_some();
+    }
+    for (int k = 0; k < 20; ++k) {
+      exec_.spin_some();
+      std::this_thread::sleep_for(5ms);
+    }
+
+    auto pub = node_->create_publisher<sensor_msgs::msg::PointCloud2>(kTopic, 5);
+    const auto msg = to_msg(scan);
+    const auto deadline = std::chrono::steady_clock::now() + 3s;
+    while (!adapter.received() && std::chrono::steady_clock::now() < deadline) {
+      pub->publish(msg);
+      exec_.spin_some();
+      std::this_thread::sleep_for(10ms);
+    }
+    return adapter.received() ? adapter.get_latest() : nullptr;
+  }
+
   static double max_error(const CloudT & cloud, const Scan & scan)
   {
     double worst = 0.0;
@@ -272,6 +328,22 @@ TEST_F(DeskewTest, RingMajorYawOnlyLandsOnTruth)
   const auto out = deskew(scan, w, Eigen::Vector3d::Zero());
   ASSERT_TRUE(out) << "adapter received nothing";
   ASSERT_EQ(out->size(), kDensePoints);
+  EXPECT_LT(max_error(*out, scan), kTolerance);
+}
+
+TEST_F(DeskewTest, ImuShockAfterScanIsNotApplied)
+{
+  // The IMU stream is steady over the scan, but its newest sample (after the
+  // scan ends) is a 8 m/s^2 shock, as a bump or a rail gap gives. Deskewing on
+  // that one sample would shift points by about 4 cm.
+  const Eigen::Vector3d w(0.0, 0.0, 0.6);
+  const Eigen::Vector3d a(2.0, 0.5, 0.0);
+  const Eigen::Vector3d shock = a + Eigen::Vector3d(8.0, 0.0, 0.0);
+  const auto scan = make_scan(0.0, [&](double dt) {return compute_motion_delta(w, a, dt);});
+
+  const auto out = deskew_streamed(scan, w, a, -0.05, kScanPeriod + 0.02, shock);
+  ASSERT_TRUE(out) << "adapter received nothing";
+  ASSERT_EQ(out->size(), kPoints);
   EXPECT_LT(max_error(*out, scan), kTolerance);
 }
 

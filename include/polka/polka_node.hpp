@@ -96,6 +96,10 @@ private:
   SourceAdapter::TwistGetter make_twist_getter(const MergeConfig & cfg);
   // Velocity of the output frame's origin, in it, from odometry over [from, to].
   Eigen::Vector3d output_velocity(const rclcpp::Time & from, const rclcpp::Time & to);
+  // Pose of a source frame in the output frame at 'stamp', or the newest pose when
+  // TF has not reached it. Throws tf2::TransformException on any other TF error.
+  geometry_msgs::msg::TransformStamped mount_pose(
+    const std::string & source_frame, const rclcpp::Time & stamp);
   DriftTracker::Config drift_config(
     const SourceConfig & sc, const DiagnosticsConfig & d) const;
 

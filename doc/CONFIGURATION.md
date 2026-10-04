@@ -114,6 +114,8 @@ Sources whose time field is `FLOAT64` nanoseconds are not supported. If you have
 
 **Plausibility guard.** On the first message from a source, polka checks that the decoded per-point times land within 10 s of the header stamp. Beyond that the units or epoch have been misread, and deskewing on such values would scatter points across the map, so polka logs a warning naming the field, the datatype and the observed `max|dt|`, then runs that source without per-point timestamps. The bound is not a scan-duration limit: a unit misread is off by a factor of a thousand or more, so 10 s leaves ample room for slow aggregated frames while still catching the real failure.
 
+**Gyro bias.** A MEMS gyro reads a few to tens of mrad/s while parked (24.6 mrad/s on a RoboSense Airy), which deskew would apply as a turn: 5 cm at 20 m per 0.1 s scan. polka learns each IMU's bias whenever its gyro holds still for a second (every axis spreads under 2 mrad/s and the mean is under 35 mrad/s) and subtracts it from every sample, logging the value the first time. Driving vibrates a gyro well past that spread, and a turn faster than 35 mrad/s is never taken for bias; a perfectly smooth turn slower than that would be. Until the vehicle first stops, the gyro is used as is.
+
 **Gravity subtraction.** With a valid IMU orientation (`orientation_covariance[0] >= 0` and a non-degenerate quaternion), gravity is rotated out of `linear_acceleration`. Without one, polka subtracts an EMA estimate of body-frame gravity instead.
 
 **Translation.** Where the sensor's translation during a scan comes from:

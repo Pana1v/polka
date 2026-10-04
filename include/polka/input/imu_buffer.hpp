@@ -26,6 +26,8 @@
 #include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/msg/imu.hpp>
 
+#include "polka/input/gyro_bias.hpp"
+
 namespace polka
 {
 
@@ -77,6 +79,10 @@ private:
   int max_size_;
   rclcpp::Logger logger_;
   rclcpp::Clock::SharedPtr clock_;
+
+  // Learned at standstill and subtracted from every gyro sample.
+  GyroBias gyro_bias_;
+  bool gyro_bias_reported_ = false;
 
   // 体坐标系重力 EMA（无 orientation 时用静止比力均值估计）
   Eigen::Vector3d g_body_ema_ = Eigen::Vector3d::Zero();

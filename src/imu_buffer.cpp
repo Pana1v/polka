@@ -119,10 +119,22 @@ void ImuBuffer::callback(sensor_msgs::msg::Imu::ConstSharedPtr msg)
       "polka: IMU has no orientation, estimating body-frame gravity via EMA");
   }
 
+  // Remove the gyro bias, learned whenever the sensor stands still.
+  const rclcpp::Time stamp(msg->header.stamp);
+  gyro_bias_.add(stamp, Eigen::Vector3d(w.x, w.y, w.z));
+  const Eigen::Vector3d gyro = Eigen::Vector3d(w.x, w.y, w.z) - gyro_bias_.bias();
+  if (gyro_bias_.learned() && !gyro_bias_reported_) {
+    gyro_bias_reported_ = true;
+    const Eigen::Vector3d b = gyro_bias_.bias() * 1e3;
+    RCLCPP_INFO(
+      logger_, "polka: IMU '%s' gyro bias learned at standstill: (%.2f, %.2f, %.2f) mrad/s",
+      topic_.c_str(), b.x(), b.y(), b.z());
+  }
+
   ImuSample sample;
-  sample.wx = w.x;  sample.wy = w.y;  sample.wz = w.z;
+  sample.wx = gyro.x();  sample.wy = gyro.y();  sample.wz = gyro.z();
   sample.ax = accel.x();  sample.ay = accel.y();  sample.az = accel.z();
-  sample.stamp = rclcpp::Time(msg->header.stamp);
+  sample.stamp = stamp;
 
   {
     std::lock_guard<std::mutex> lock(mutex_);
@@ -136,7 +148,7 @@ void ImuBuffer::callback(sensor_msgs::msg::Imu::ConstSharedPtr msg)
   msg_count_.fetch_add(1, std::memory_order_relaxed);
 
   auto avg = std::make_shared<AveragedImu>();
-  avg->angular_vel = Eigen::Vector3d(w.x, w.y, w.z);
+  avg->angular_vel = gyro;
   avg->linear_accel = accel;
   avg->valid = true;
   avg->frame_id = msg->header.frame_id;

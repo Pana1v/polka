@@ -16,7 +16,11 @@
 
 #include <pcl_conversions/pcl_conversions.h>
 
+#include <algorithm>
+#include <cmath>
 #include <cstring>
+#include <string>
+#include <vector>
 
 #include "polka/util/log_format.hpp"
 #include "polka/util/se3_exp.hpp"
@@ -29,11 +33,11 @@ namespace polka
 
 namespace
 {
-// Rotation-only deskew fast path: exact-compute the per-point rotation every this
-// many points, linearly interpolate the rest. See deskew_cloud() for the error bound.
-constexpr size_t kDeskewInterpStride = 16;
-// Largest angle the rotation-only path interpolates across before re-anchoring.
+// Largest angle a point is stepped from its anchor to first order (see AnchorTable).
 constexpr double kMaxInterpAngleRad = 2e-3;
+// Most anchors one scan builds. Beyond this the spacing widens, and points whose
+// nearest anchor is out of bounds take the exact formula.
+constexpr size_t kMaxAnchors = 4096;
 // Scan-wide translation below this is dropped in favour of the rotation-only path.
 constexpr double kNegligibleTranslationM = 1e-3;
 // Largest translation error the SE(3) path accepts from holding the translation
@@ -42,6 +46,77 @@ constexpr double kMaxInterpTranslationErrM = 1e-4;
 // Below these, angular rate / per-point angle counts as zero.
 constexpr double kMinAngularRate = 1e-10;
 constexpr double kMinAngle = 1e-9;
+
+// R(theta) by Rodrigues, and the SO(3) left Jacobian V(theta) when V is given, about
+// the axis whose skew matrix is K. 1 - cos(theta) is taken as 2 sin^2(theta / 2) so
+// small angles keep precision.
+void rotation_and_jacobian(
+  float theta, const Eigen::Matrix3f & K, const Eigen::Matrix3f & K2,
+  Eigen::Matrix3f & R, Eigen::Matrix3f * V)
+{
+  R.setIdentity();
+  if (V) {V->setIdentity();}
+  if (std::abs(theta) <= kMinAngle) {return;}
+
+  const float sin_half = std::sin(0.5f * theta);
+  const float cos_half = std::cos(0.5f * theta);
+  const float s = 2.0f * sin_half * cos_half;
+  const float one_minus_c = 2.0f * sin_half * sin_half;
+  R += s * K + one_minus_c * K2;
+  if (V) {*V += (one_minus_c / theta) * K + ((theta - s) / theta) * K2;}
+}
+
+// Exact R (and V) at evenly spaced angles across one scan. Each point takes its
+// nearest anchor and steps to first order:
+//   R(theta) p ~= R_a (p + dtheta k x p),   V(theta) rho ~= V_a rho.
+// Work per point then depends on neither point order nor scan pattern: column-major
+// spinning, row-timed vertical sweeps and unordered clouds all cost the same.
+//
+//   theta:   theta_min ----a0----a1----a2---- ... ----aN---- theta_max
+//   point:                      ^ nearest anchor, |dtheta| <= spacing / 2
+class AnchorTable
+{
+public:
+  enum class Jacobian { SKIP, BUILD };
+
+  AnchorTable(
+    float theta_min, float theta_max, float max_step,
+    const Eigen::Matrix3f & K, const Eigen::Matrix3f & K2, Jacobian jacobian)
+  : theta0_(theta_min)
+  {
+    const float span = std::max(0.0f, theta_max - theta_min);
+    size_t count = static_cast<size_t>(std::ceil(span / (2.0f * max_step))) + 1;
+    count = std::min(count, kMaxAnchors);
+    spacing_ = count > 1 ? span / static_cast<float>(count - 1) : 1.0f;
+    inv_spacing_ = 1.0f / spacing_;
+
+    R_.resize(count);
+    if (jacobian == Jacobian::BUILD) {V_.resize(count);}
+    for (size_t a = 0; a < count; ++a) {
+      rotation_and_jacobian(
+        theta_at(a), K, K2, R_[a], jacobian == Jacobian::BUILD ? &V_[a] : nullptr);
+    }
+  }
+
+  // Index of the anchor nearest theta, clamped to the table.
+  size_t nearest(float theta) const
+  {
+    const float x = (theta - theta0_) * inv_spacing_ + 0.5f;
+    if (x <= 0.0f) {return 0;}
+    return std::min(static_cast<size_t>(x), R_.size() - 1);
+  }
+
+  float theta_at(size_t a) const {return theta0_ + spacing_ * static_cast<float>(a);}
+  const Eigen::Matrix3f & R(size_t a) const {return R_[a];}
+  const Eigen::Matrix3f & V(size_t a) const {return V_[a];}
+
+private:
+  float theta0_;
+  float spacing_ = 1.0f;
+  float inv_spacing_ = 1.0f;
+  std::vector<Eigen::Matrix3f> R_;
+  std::vector<Eigen::Matrix3f> V_;
+};
 
 // True when 'data' actually holds every point the message claims, so walking it
 // by point_step cannot run off the end. Every raw-byte read of the per-point time
@@ -295,16 +370,24 @@ void SourceAdapter::deskew_cloud(
   const bool rotation_only =
     velocity.norm() * dt_max + 0.5 * accel.norm() * dt_max * dt_max < kNegligibleTranslationM;
 
+  const Eigen::Matrix3f K = (Eigen::Matrix3f() <<
+    0.0f, -axis.z(), axis.y(),
+    axis.z(), 0.0f, -axis.x(),
+    -axis.y(), axis.x(), 0.0f).finished();
+  const Eigen::Matrix3f K2 = K * K;
+  const float theta_min = omega_f * static_cast<float>(dt_range.min);
+  const float theta_max = omega_f * static_cast<float>(dt_range.max);
+
   if (rotation_only) {
     if (omega_mag <= kMinAngularRate) {return;}
 
-    // Exact rotation at a coarse stride, first-order Rodrigues expansion around the
-    // anchor in between: R(t) p ~= R(t_a) (p + (t - t_a) k x p). Error is about
-    // r * dtheta^2 / 2, so re-anchor whenever dtheta grows past kMaxInterpAngleRad
-    // (0.2 mm at 100 m), e.g. at a ring boundary in ring-major clouds.
-    Eigen::Matrix3f R_anchor = Eigen::Matrix3f::Identity();
-    float theta_anchor = 0.0f;
-    bool have_anchor = false;
+    // First-order step from the nearest anchor errs by about r * dtheta^2 / 2:
+    // 0.2 mm at 100 m for dtheta = kMaxInterpAngleRad. A point the sampled time
+    // span missed lands past the table's end and takes the exact rotation.
+    const float max_step = static_cast<float>(kMaxInterpAngleRad);
+    const AnchorTable anchors(
+      theta_min, theta_max, max_step, K, K2, AnchorTable::Jacobian::SKIP);
+    Eigen::Matrix3f R_exact;
 
     for (size_t i = 0; i < n; ++i) {
       const double dt = decoder_.dt(raw_data + i * point_step, header_sec);
@@ -312,17 +395,15 @@ void SourceAdapter::deskew_cloud(
 
       const float theta = omega_f * static_cast<float>(dt);
       const Eigen::Vector3f p(cloud[i].x, cloud[i].y, cloud[i].z);
-      Eigen::Vector3f corrected;
+      const size_t a = anchors.nearest(theta);
+      const float dtheta = theta - anchors.theta_at(a);
 
-      const bool reanchor = !have_anchor || (i % kDeskewInterpStride) == 0 ||
-        std::abs(theta - theta_anchor) > kMaxInterpAngleRad;
-      if (reanchor) {
-        R_anchor = Eigen::AngleAxisf(theta, axis).toRotationMatrix();
-        theta_anchor = theta;
-        have_anchor = true;
-        corrected = R_anchor * p;
+      Eigen::Vector3f corrected;
+      if (std::abs(dtheta) <= max_step) {
+        corrected = anchors.R(a) * (p + dtheta * axis.cross(p));
       } else {
-        corrected = R_anchor * (p + (theta - theta_anchor) * axis.cross(p));
+        rotation_and_jacobian(theta, K, K2, R_exact, nullptr);
+        corrected = R_exact * p;
       }
 
       cloud[i].x = corrected.x();
@@ -334,29 +415,17 @@ void SourceAdapter::deskew_cloud(
 
   // Full SE(3): p_header = R(theta) p + V(theta) rho, with
   // rho = v * dt + 0.5 * a * dt^2, R by Rodrigues and V the SO(3) left Jacobian,
-  // both about the fixed axis. Same anchoring as the rotation-only path: R and V
-  // exact at anchors, and in between
-  //   R(theta) p ~= R_a (p + dtheta k x p),   V(theta) rho ~= V_a rho.
-  // The V shortcut errs by about dtheta * |rho| / 2, so also re-anchor once that
-  // passes kMaxInterpTranslationErrM: never on a ground robot (|rho| of
-  // centimetres), every few points at road speed (|rho| of metres).
-  // rho itself stays exact per point.
-  // 1 - cos(theta) is taken as 2 sin^2(theta / 2) so small angles keep precision.
-  const Eigen::Matrix3f K = (Eigen::Matrix3f() <<
-    0.0f, -axis.z(), axis.y(),
-    axis.z(), 0.0f, -axis.x(),
-    -axis.y(), axis.x(), 0.0f).finished();
-  const Eigen::Matrix3f K2 = K * K;
-  Eigen::Matrix3f R_anchor = Eigen::Matrix3f::Identity();
-  Eigen::Matrix3f V_anchor = Eigen::Matrix3f::Identity();
-  float theta_anchor = 0.0f;
-  bool have_anchor = false;
-
-  // Bound dtheta so the V shortcut stays under kMaxInterpTranslationErrM for the
-  // largest |rho| in the scan. Leaves kMaxInterpAngleRad in charge below ~0.1 m.
+  // both about the fixed axis, from the same anchor table. Holding V at the anchor
+  // errs by about dtheta * |rho| / 2, so the spacing also shrinks until that stays
+  // under kMaxInterpTranslationErrM: unchanged on a ground robot (|rho| of
+  // centimetres), finer at road speed (|rho| of metres). rho stays exact per point.
   const double rho_max = velocity.norm() * dt_max + 0.5 * accel.norm() * dt_max * dt_max;
-  const float max_interp_angle = static_cast<float>(
+  const float max_step = static_cast<float>(
     std::min(kMaxInterpAngleRad, 2.0 * kMaxInterpTranslationErrM / rho_max));
+  const AnchorTable anchors(
+    theta_min, theta_max, max_step, K, K2, AnchorTable::Jacobian::BUILD);
+  Eigen::Matrix3f R_exact;
+  Eigen::Matrix3f V_exact;
 
   for (size_t i = 0; i < n; ++i) {
     const double dt = decoder_.dt(raw_data + i * point_step, header_sec);
@@ -366,26 +435,16 @@ void SourceAdapter::deskew_cloud(
     const float theta = omega_f * dt_f;
     const Eigen::Vector3f p(cloud[i].x, cloud[i].y, cloud[i].z);
     const Eigen::Vector3f rho = (velocity_f + half_accel * dt_f) * dt_f;
+    const size_t a = anchors.nearest(theta);
+    const float dtheta = theta - anchors.theta_at(a);
 
-    const bool reanchor = !have_anchor || (i % kDeskewInterpStride) == 0 ||
-      std::abs(theta - theta_anchor) > max_interp_angle;
-    if (reanchor) {
-      R_anchor.setIdentity();
-      V_anchor.setIdentity();
-      if (std::abs(theta) > kMinAngle) {
-        const float sin_half = std::sin(0.5f * theta);
-        const float cos_half = std::cos(0.5f * theta);
-        const float s = 2.0f * sin_half * cos_half;
-        const float one_minus_c = 2.0f * sin_half * sin_half;
-        R_anchor += s * K + one_minus_c * K2;
-        V_anchor += (one_minus_c / theta) * K + ((theta - s) / theta) * K2;
-      }
-      theta_anchor = theta;
-      have_anchor = true;
+    Eigen::Vector3f corrected;
+    if (std::abs(dtheta) <= max_step) {
+      corrected = anchors.R(a) * (p + dtheta * axis.cross(p)) + anchors.V(a) * rho;
+    } else {
+      rotation_and_jacobian(theta, K, K2, R_exact, &V_exact);
+      corrected = R_exact * p + V_exact * rho;
     }
-
-    const Eigen::Vector3f corrected =
-      R_anchor * (p + (theta - theta_anchor) * axis.cross(p)) + V_anchor * rho;
 
     cloud[i].x = corrected.x();
     cloud[i].y = corrected.y();

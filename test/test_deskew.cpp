@@ -48,6 +48,8 @@ namespace
 
 constexpr char kTopic[] = "/deskew_test_points";
 constexpr size_t kPoints = 400;
+constexpr size_t kDensePoints = 8000;  // ~ a 16-ring lidar's share per 0.1 s
+constexpr size_t kRings = 8;
 constexpr double kScanPeriod = 0.1;   // 10 Hz lidar
 constexpr double kTolerance = 1e-3;   // 1 mm, well under any real skew below
 const rclcpp::Time kHeaderStamp(1700000000, 0, RCL_ROS_TIME);
@@ -59,19 +61,24 @@ struct Scan
   std::vector<double> dt;               // seconds after header (may be negative)
 };
 
-// Static points on a ring, swept once. 'motion' maps dt to the sensor pose at dt
-// relative to header time.
+// Static points on a ring, swept once per ring. 'motion' maps dt to the sensor pose
+// at dt relative to header time. With rings > 1 the cloud is ring-major, as many
+// drivers emit it: each ring sweeps the whole scan period, so dt jumps back at
+// every ring start.
 template<typename Motion>
-Scan make_scan(double dt_first, Motion motion)
+Scan make_scan(double dt_first, Motion motion, size_t points = kPoints, size_t rings = 1)
 {
   Scan s;
-  for (size_t i = 0; i < kPoints; ++i) {
-    const double frac = static_cast<double>(i) / (kPoints - 1);
+  const size_t per_ring = points / rings;
+  for (size_t i = 0; i < per_ring * rings; ++i) {
+    const size_t ring = i / per_ring;
+    const double frac = static_cast<double>(i % per_ring) / (per_ring - 1);
     const double azimuth = -M_PI + 2.0 * M_PI * frac;
     const double range = 5.0 + 15.0 * frac;
     const double dt = dt_first + kScanPeriod * frac;
 
-    const Eigen::Vector3d p(range * std::cos(azimuth), range * std::sin(azimuth), 0.5);
+    const Eigen::Vector3d p(
+      range * std::cos(azimuth), range * std::sin(azimuth), 0.5 + 0.3 * ring);
     s.world.push_back(p);
     s.seen.push_back(motion(dt).inverse() * p);
     s.dt.push_back(dt);
@@ -224,6 +231,47 @@ TEST_F(DeskewTest, ImuNoiseAccelStillLandsOnTruth)
   const auto out = deskew(scan, w, a);
   ASSERT_TRUE(out) << "adapter received nothing";
   ASSERT_EQ(out->size(), kPoints);
+  EXPECT_LT(max_error(*out, scan), kTolerance);
+}
+
+TEST_F(DeskewTest, DenseFastTurnWithAccelLandsOnTruth)
+{
+  // Dense like a real lidar, so any per-point shortcut is exercised, and a tilted
+  // axis turning fast enough to stress interpolation.
+  const Eigen::Vector3d w(0.1, -0.05, 2.0);
+  const Eigen::Vector3d a(3.0, 1.0, 0.5);
+  const auto scan = make_scan(
+    0.0, [&](double dt) {return compute_motion_delta(w, a, dt);}, kDensePoints);
+
+  const auto out = deskew(scan, w, a);
+  ASSERT_TRUE(out) << "adapter received nothing";
+  ASSERT_EQ(out->size(), kDensePoints);
+  EXPECT_LT(max_error(*out, scan), kTolerance);
+}
+
+TEST_F(DeskewTest, RingMajorWithAccelLandsOnTruth)
+{
+  // Point time jumps back at every ring start: nothing may carry over across it.
+  const Eigen::Vector3d w(0.0, 0.0, 0.6);
+  const Eigen::Vector3d a(2.0, 0.0, 0.0);
+  const auto scan = make_scan(
+    0.0, [&](double dt) {return compute_motion_delta(w, a, dt);}, kDensePoints, kRings);
+
+  const auto out = deskew(scan, w, a);
+  ASSERT_TRUE(out) << "adapter received nothing";
+  ASSERT_EQ(out->size(), kDensePoints);
+  EXPECT_LT(max_error(*out, scan), kTolerance);
+}
+
+TEST_F(DeskewTest, RingMajorYawOnlyLandsOnTruth)
+{
+  const Eigen::Vector3d w(0.0, 0.0, 0.6);
+  const auto scan = make_scan(
+    0.0, [&](double dt) {return yaw_motion(w.z(), dt);}, kDensePoints, kRings);
+
+  const auto out = deskew(scan, w, Eigen::Vector3d::Zero());
+  ASSERT_TRUE(out) << "adapter received nothing";
+  ASSERT_EQ(out->size(), kDensePoints);
   EXPECT_LT(max_error(*out, scan), kTolerance);
 }
 

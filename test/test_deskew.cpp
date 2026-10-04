@@ -29,6 +29,8 @@
 #include <cmath>
 #include <cstring>
 #include <memory>
+#include <numeric>
+#include <random>
 #include <thread>
 #include <vector>
 
@@ -57,6 +59,8 @@ constexpr int kImuBufferSize = 200;
 constexpr size_t kPoints = 400;
 constexpr size_t kDensePoints = 8000;  // ~ a 16-ring lidar's share per 0.1 s
 constexpr size_t kRings = 8;
+constexpr size_t kSweepRows = 64;      // vertically sweeping solid-state lidar
+constexpr size_t kSweepCols = 125;
 constexpr double kScanPeriod = 0.1;   // 10 Hz lidar
 constexpr double kTolerance = 1e-3;   // 1 mm, well under any real skew below
 const rclcpp::Time kHeaderStamp(1700000000, 0, RCL_ROS_TIME);
@@ -91,6 +95,49 @@ Scan make_scan(double dt_first, Motion motion, size_t points = kPoints, size_t r
     s.dt.push_back(dt);
   }
   return s;
+}
+
+// Vertically sweeping lidar (rows bottom to top over the scan period): every point
+// in a row shares one time, while memory order is column-major, so consecutive
+// points hop between rows and times.
+template<typename Motion>
+Scan make_vertical_sweep(Motion motion)
+{
+  Scan s;
+  for (size_t col = 0; col < kSweepCols; ++col) {
+    for (size_t row = 0; row < kSweepRows; ++row) {
+      const double u = static_cast<double>(col) / (kSweepCols - 1);
+      const double v = static_cast<double>(row) / (kSweepRows - 1);
+      const double azimuth = -1.0 + 2.0 * u;          // +-57 deg
+      const double elevation = -0.35 + 0.7 * v;       // +-20 deg
+      const double range = 5.0 + 15.0 * u;
+      const double dt = kScanPeriod * v;
+
+      const Eigen::Vector3d p = range * Eigen::Vector3d(
+        std::cos(elevation) * std::cos(azimuth), std::cos(elevation) * std::sin(azimuth),
+        std::sin(elevation));
+      s.world.push_back(p);
+      s.seen.push_back(motion(dt).inverse() * p);
+      s.dt.push_back(dt);
+    }
+  }
+  return s;
+}
+
+// Same points in a fixed pseudo-random order, as unordered or non-repetitive
+// (Livox-style) clouds arrive.
+Scan shuffled(const Scan & in)
+{
+  std::vector<size_t> order(in.dt.size());
+  std::iota(order.begin(), order.end(), 0);
+  std::shuffle(order.begin(), order.end(), std::mt19937(7));
+  Scan out;
+  for (size_t i : order) {
+    out.world.push_back(in.world[i]);
+    out.seen.push_back(in.seen[i]);
+    out.dt.push_back(in.dt[i]);
+  }
+  return out;
 }
 
 // FLOAT64 absolute-epoch 'timestamp' field, as RoboSense and Hesai drivers emit it.
@@ -356,6 +403,48 @@ TEST_F(DeskewTest, RingMajorYawOnlyLandsOnTruth)
   const auto out = deskew(scan, w, Eigen::Vector3d::Zero());
   ASSERT_TRUE(out) << "adapter received nothing";
   ASSERT_EQ(out->size(), kDensePoints);
+  EXPECT_LT(max_error(*out, scan), kTolerance);
+}
+
+TEST_F(DeskewTest, VerticalSweepLandsOnTruth)
+{
+  const Eigen::Vector3d w(0.1, -0.05, 2.0);
+  const Eigen::Vector3d a(3.0, 1.0, 0.5);
+  const auto scan = make_vertical_sweep([&](double dt) {return compute_motion_delta(w, a, dt);});
+
+  const auto out = deskew(scan, w, a);
+  ASSERT_TRUE(out) << "adapter received nothing";
+  ASSERT_EQ(out->size(), kSweepRows * kSweepCols);
+  EXPECT_LT(max_error(*out, scan), kTolerance);
+}
+
+TEST_F(DeskewTest, ShuffledOrderLandsOnTruth)
+{
+  const Eigen::Vector3d w(0.1, -0.05, 2.0);
+  const auto scan = shuffled(
+    make_scan(0.0, [&](double dt) {return yaw_motion(w.z(), dt);}, kDensePoints, kRings));
+
+  const auto out = deskew(scan, Eigen::Vector3d(0.0, 0.0, w.z()), Eigen::Vector3d::Zero());
+  ASSERT_TRUE(out) << "adapter received nothing";
+  ASSERT_EQ(out->size(), kDensePoints);
+  EXPECT_LT(max_error(*out, scan), kTolerance);
+}
+
+TEST_F(DeskewTest, TimeOutsideSampledRangeLandsOnTruth)
+{
+  // The scan's time span is estimated from a sample of points. A late point the
+  // sample skips must still deskew exactly.
+  const Eigen::Vector3d w(0.0, 0.0, 2.0);
+  const Eigen::Vector3d a(2.0, 0.0, 0.0);
+  auto motion = [&](double dt) {return compute_motion_delta(w, a, dt);};
+  auto scan = make_scan(0.0, motion);
+  constexpr size_t kUnsampled = 3;   // 400 points are sampled every 7th
+  scan.dt[kUnsampled] = 1.5 * kScanPeriod;
+  scan.seen[kUnsampled] = motion(scan.dt[kUnsampled]).inverse() * scan.world[kUnsampled];
+
+  const auto out = deskew(scan, w, a);
+  ASSERT_TRUE(out) << "adapter received nothing";
+  ASSERT_EQ(out->size(), kPoints);
   EXPECT_LT(max_error(*out, scan), kTolerance);
 }
 

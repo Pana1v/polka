@@ -22,17 +22,12 @@
 polka:
   ros__parameters:
 
+    # Everything not set here keeps its default (config/detailed_params.yaml).
     output_frame_id: "base_link"     # all points are transformed into this frame
-    output_rate: 20.0                # Hz - merged output publish rate
-    enable_gpu: true                 # use CUDA when available (falls back to CPU)
 
     outputs:
-      cloud:
-        enabled: true
-        topic: "~/merged_cloud"
       scan:                          # flattens the merged cloud into a 2D scan
         enabled: true
-        topic: "~/merged_scan"
         z_min: -0.10                 # meters - bottom of the horizontal slice
         z_max:  0.50                 # meters - top of the horizontal slice
 
@@ -44,12 +39,8 @@ polka:
       front_3d:
         topic: "/front_lidar/points"
         type: "pointcloud2"
-        qos_reliability: "best_effort"
-        qos_history_depth: 1
 
       # 2D LiDAR (LaserScan, auto-converted to PointCloud2)
       rear_2d:
         topic: "/rear_lidar/scan"
         type: "laserscan"
-        qos_reliability: "best_effort"
-        qos_history_depth: 1

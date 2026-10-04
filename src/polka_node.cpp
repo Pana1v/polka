@@ -68,6 +68,11 @@ bool drift_params_equal(const DiagnosticsConfig & a, const DiagnosticsConfig & b
          a.rate_baseline_sec == b.rate_baseline_sec;
 }
 
+bool wants_odom(const MotionCompensationConfig & mc)
+{
+  return mc.enabled && mc.translation == TranslationMode::ODOMETRY && !mc.odom_topic.empty();
+}
+
 bool any_source_has_own_imu(const std::vector<SourceConfig> & sources)
 {
   return std::any_of(
@@ -125,6 +130,10 @@ PolkaNode::PolkaNode(const rclcpp::NodeOptions & options)
     }
   }
 
+  if (wants_odom(config_.motion_compensation)) {
+    odom_ = std::make_shared<OdomBuffer>(this, config_.motion_compensation.odom_topic);
+  }
+
   for (const auto & src_cfg : config_.sources) {
     SourceSlot slot;
     slot.adapter = make_adapter(src_cfg, config_);
@@ -167,10 +176,47 @@ SourceAdapter::ImuGetter PolkaNode::make_imu_getter(const MergeConfig & cfg)
   }
   // Resolve global_imu_ at call time, not capture time: a runtime reconfigure
   // may reset or replace the buffer while adapters keep this getter.
-  return [this]() -> std::shared_ptr<const AveragedImu> {
+  return [this](const rclcpp::Time & from, const rclcpp::Time & to)
+         -> std::shared_ptr<const AveragedImu> {
            auto imu = global_imu_;
-           return imu ? imu->snapshot() : nullptr;
+           return imu ? imu->average(from, to) : nullptr;
          };
+}
+
+SourceAdapter::TwistGetter PolkaNode::make_twist_getter(const MergeConfig & cfg)
+{
+  if (cfg.motion_compensation.translation != TranslationMode::ODOMETRY) {
+    return nullptr;
+  }
+  // Resolved at call time, like make_imu_getter().
+  return [this](const rclcpp::Time & from, const rclcpp::Time & to)
+         -> std::shared_ptr<const BodyTwist> {
+           auto odom = odom_;
+           return odom ? odom->average(from, to) : nullptr;
+         };
+}
+
+Eigen::Vector3d PolkaNode::output_velocity(const rclcpp::Time & from, const rclcpp::Time & to)
+{
+  auto odom = odom_;
+  const auto twist = odom ? odom->average(from, to) : nullptr;
+  if (!twist || !twist->valid) {return Eigen::Vector3d::Zero();}
+
+  Eigen::Isometry3d T_twist_out = Eigen::Isometry3d::Identity();
+  if (!twist->frame_id.empty() && twist->frame_id != config_.output_frame_id) {
+    try {
+      T_twist_out = tf2::transformToEigen(
+        tf_buffer_->lookupTransform(
+          twist->frame_id, config_.output_frame_id, tf2::TimePointZero));
+    } catch (const tf2::TransformException & ex) {
+      RCLCPP_WARN_THROTTLE(
+        get_logger(), *get_clock(), kLogThrottleNormalMs,
+        "polka: cannot place odometry frame '%s' (%s), aligning sources by rotation only",
+        twist->frame_id.c_str(), ex.what());
+      return Eigen::Vector3d::Zero();
+    }
+  }
+  return velocity_at_frame(twist->linear, twist->angular, T_twist_out);
 }
 
 std::unique_ptr<SourceAdapter> PolkaNode::make_adapter(
@@ -180,7 +226,8 @@ std::unique_ptr<SourceAdapter> PolkaNode::make_adapter(
   return std::make_unique<SourceAdapter>(
     this, sc, merge_engine_->is_gpu(), make_imu_getter(cfg),
     mc.enabled && mc.per_point_deskew,
-    mc.deskew_timestamp_field, tf_buffer_, mc.imu_buffer_size);
+    mc.deskew_timestamp_field, tf_buffer_, mc.imu_buffer_size,
+    mc.translation, make_twist_getter(cfg));
 }
 
 DriftTracker::Config PolkaNode::drift_config(
@@ -343,6 +390,16 @@ void PolkaNode::apply_reconfigure()
       "polka: motion compensation enabled but imu_topic is empty, deskewing will not activate");
   }
 
+  // Odometry twist buffer.
+  const bool odom_now = wants_odom(new_mc);
+  if (odom_now && (!odom_ || odom_->topic() != new_mc.odom_topic)) {
+    odom_ = std::make_shared<OdomBuffer>(this, new_mc.odom_topic);
+    changes.emplace_back("odom_topic='" + new_mc.odom_topic + "'");
+  } else if (!odom_now && odom_) {
+    odom_.reset();
+    changes.emplace_back("odometry=off");
+  }
+
   rebuild_sources(old_config, new_config, changes);
 
   if (new_config.output_frame_id != old_config.output_frame_id) {
@@ -385,7 +442,8 @@ void PolkaNode::rebuild_sources(
     old_config.motion_compensation.deskew_timestamp_field !=
     new_config.motion_compensation.deskew_timestamp_field ||
     old_config.motion_compensation.imu_buffer_size !=
-    new_config.motion_compensation.imu_buffer_size;
+    new_config.motion_compensation.imu_buffer_size ||
+    old_config.motion_compensation.translation != new_config.motion_compensation.translation;
   const bool drift_cfg_changed =
     !drift_params_equal(old_config.diagnostics, new_config.diagnostics);
 
@@ -796,11 +854,29 @@ void PolkaNode::output_callback()
 
   bool do_compensate = false;
   AveragedImu imu_for_alignment;
+  Eigen::Vector3d align_velocity = Eigen::Vector3d::Zero();
+  Eigen::Vector3d align_accel = Eigen::Vector3d::Zero();
   if (config_.motion_compensation.enabled && global_imu_) {
-    auto imu = global_imu_->snapshot();
+    // Average over the span the sources are aligned across.
+    rclcpp::Time from = output_stamp, to = output_stamp;
+    for (const auto & sd : source_data) {
+      from = std::min(from, sd.stamp);
+      to = std::max(to, sd.stamp);
+    }
+    auto imu = global_imu_->average(from, to);
     if (imu && imu->valid) {
       imu_for_alignment = *imu;
       do_compensate = true;
+    }
+    switch (config_.motion_compensation.translation) {
+      case TranslationMode::NONE:
+        break;
+      case TranslationMode::IMU_ACCEL:
+        align_accel = imu_for_alignment.linear_accel;
+        break;
+      case TranslationMode::ODOMETRY:
+        align_velocity = output_velocity(from, to);
+        break;
     }
   }
 
@@ -813,7 +889,7 @@ void PolkaNode::output_callback()
       double dt = (sd.stamp - output_stamp).seconds();
       if (std::abs(dt) > 1e-6) {
         Eigen::Isometry3d delta = compute_motion_delta(
-          imu_for_alignment.angular_vel, imu_for_alignment.linear_accel, dt);
+          imu_for_alignment.angular_vel, align_velocity, align_accel, dt);
         final_transform = delta * sd.transform;
       }
     }

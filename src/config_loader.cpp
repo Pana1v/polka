@@ -80,6 +80,8 @@ void ConfigLoader::declare_defaults()
   node_->declare_parameter<bool>("motion_compensation.per_point_deskew", true);
   node_->declare_parameter<std::string>("motion_compensation.deskew_timestamp_field", "auto");
   node_->declare_parameter<std::string>("motion_compensation.imu_frame", "");
+  node_->declare_parameter<std::string>("motion_compensation.translation", "imu_accel");
+  node_->declare_parameter<std::string>("motion_compensation.odom_topic", "");
 
   // diagnostics + drift detection
   node_->declare_parameter<bool>("diagnostics.enabled", true);
@@ -283,6 +285,29 @@ MergeConfig ConfigLoader::read_common_params()
     param("motion_compensation.deskew_timestamp_field").as_string();
   cfg.motion_compensation.imu_frame =
     param("motion_compensation.imu_frame").as_string();
+  cfg.motion_compensation.odom_topic =
+    param("motion_compensation.odom_topic").as_string();
+
+  auto tr_str = param("motion_compensation.translation").as_string();
+  if (tr_str == "none") {
+    cfg.motion_compensation.translation = TranslationMode::NONE;
+  } else if (tr_str == "imu_accel") {
+    cfg.motion_compensation.translation = TranslationMode::IMU_ACCEL;
+  } else if (tr_str == "odometry") {
+    cfg.motion_compensation.translation = TranslationMode::ODOMETRY;
+  } else {
+    throw std::runtime_error(
+            "polka: invalid motion_compensation.translation '" + tr_str +
+            "' (none | imu_accel | odometry)");
+  }
+  if (cfg.motion_compensation.enabled &&
+    cfg.motion_compensation.translation == TranslationMode::ODOMETRY &&
+    cfg.motion_compensation.odom_topic.empty())
+  {
+    throw std::runtime_error(
+            "polka: motion_compensation.translation 'odometry' needs "
+            "motion_compensation.odom_topic");
+  }
 
   cfg.diagnostics.enabled = param("diagnostics.enabled").as_bool();
   cfg.diagnostics.publish_period_sec = param("diagnostics.publish_period_sec").as_double();
@@ -387,7 +412,20 @@ MergeConfig ConfigLoader::read_config(
 MergeConfig ConfigLoader::load()
 {
   auto source_names = node_->get_parameter("source_names").as_string_array();
-  return read_config(source_names, /*allow_pending=*/ false);
+  MergeConfig cfg = read_config(source_names, /*allow_pending=*/ false);
+
+  // Still accepted so old configs load, but nothing reads them.
+  const MotionCompensationConfig defaults;
+  if (cfg.motion_compensation.max_imu_age != defaults.max_imu_age) {
+    RCLCPP_WARN(
+      logger_, "polka: motion_compensation.max_imu_age has no effect and can be removed");
+  }
+  if (cfg.motion_compensation.imu_frame != defaults.imu_frame) {
+    RCLCPP_WARN(
+      logger_, "polka: motion_compensation.imu_frame has no effect and can be removed; "
+      "the IMU frame comes from each message's header.frame_id");
+  }
+  return cfg;
   // Summary printed via PolkaNode startup banner once construction completes.
 }
 

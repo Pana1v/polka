@@ -39,6 +39,36 @@ std::shared_ptr<const AveragedImu> ImuBuffer::snapshot() const
   return std::atomic_load(&snapshot_);
 }
 
+std::shared_ptr<const AveragedImu> ImuBuffer::average(
+  const rclcpp::Time & from, const rclcpp::Time & to) const
+{
+  constexpr int kMinWindowSamples = 2;
+
+  auto avg = std::make_shared<AveragedImu>();
+  int count = 0;
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    for (const auto & s : buffer_) {
+      if (s.stamp.get_clock_type() != from.get_clock_type() || s.stamp < from || s.stamp > to) {
+        continue;
+      }
+      avg->angular_vel += Eigen::Vector3d(s.wx, s.wy, s.wz);
+      avg->linear_accel += Eigen::Vector3d(s.ax, s.ay, s.az);
+      ++count;
+    }
+    avg->frame_id = frame_id_;
+  }
+
+  if (count < kMinWindowSamples) {
+    return snapshot();
+  }
+
+  avg->angular_vel /= count;
+  avg->linear_accel /= count;
+  avg->valid = true;
+  return avg;
+}
+
 rclcpp::Time ImuBuffer::last_stamp() const
 {
   std::lock_guard<std::mutex> lock(mutex_);
@@ -101,6 +131,7 @@ void ImuBuffer::callback(sensor_msgs::msg::Imu::ConstSharedPtr msg)
       buffer_.pop_front();
     }
     last_stamp_ = sample.stamp;
+    frame_id_ = msg->header.frame_id;
   }
   msg_count_.fetch_add(1, std::memory_order_relaxed);
 

@@ -167,9 +167,10 @@ SourceAdapter::ImuGetter PolkaNode::make_imu_getter(const MergeConfig & cfg)
   }
   // Resolve global_imu_ at call time, not capture time: a runtime reconfigure
   // may reset or replace the buffer while adapters keep this getter.
-  return [this]() -> std::shared_ptr<const AveragedImu> {
+  return [this](const rclcpp::Time & from, const rclcpp::Time & to)
+         -> std::shared_ptr<const AveragedImu> {
            auto imu = global_imu_;
-           return imu ? imu->snapshot() : nullptr;
+           return imu ? imu->average(from, to) : nullptr;
          };
 }
 
@@ -797,7 +798,13 @@ void PolkaNode::output_callback()
   bool do_compensate = false;
   AveragedImu imu_for_alignment;
   if (config_.motion_compensation.enabled && global_imu_) {
-    auto imu = global_imu_->snapshot();
+    // Average over the span the sources are aligned across.
+    rclcpp::Time from = output_stamp, to = output_stamp;
+    for (const auto & sd : source_data) {
+      from = std::min(from, sd.stamp);
+      to = std::max(to, sd.stamp);
+    }
+    auto imu = global_imu_->average(from, to);
     if (imu && imu->valid) {
       imu_for_alignment = *imu;
       do_compensate = true;

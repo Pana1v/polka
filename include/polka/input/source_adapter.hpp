@@ -42,7 +42,9 @@ namespace polka
 class SourceAdapter
 {
 public:
-  using ImuGetter = std::function<std::shared_ptr<const AveragedImu>()>;
+  // IMU state over [from, to], the span of one scan.
+  using ImuGetter = std::function<std::shared_ptr<const AveragedImu>(
+        const rclcpp::Time & from, const rclcpp::Time & to)>;
 
   SourceAdapter(
     rclcpp::Node * node, const SourceConfig & config, bool gpu_filters = false,
@@ -82,9 +84,7 @@ private:
   void detect_timestamp_field(const sensor_msgs::msg::PointCloud2 & msg);
   // Fill each point's 'time' field with its absolute acquisition time (Unix sec).
   void populate_point_time(CloudT & cloud, const sensor_msgs::msg::PointCloud2 & raw_msg);
-  void deskew_cloud(
-    CloudT & cloud, const sensor_msgs::msg::PointCloud2 & raw_msg,
-    const AveragedImu & imu);
+  void deskew_cloud(CloudT & cloud, const sensor_msgs::msg::PointCloud2 & raw_msg);
 
   rclcpp::Node * node_;
   SourceConfig config_;

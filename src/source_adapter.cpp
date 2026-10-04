@@ -62,8 +62,8 @@ SourceAdapter::SourceAdapter(
   // Per-source IMU: if configured, create a local buffer and override the getter
   if (deskew_enabled_ && !config.imu_topic.empty()) {
     local_imu_ = std::make_shared<ImuBuffer>(node, config.imu_topic, imu_buffer_size);
-    get_imu_ = [this]() -> std::shared_ptr<const AveragedImu> {
-        return local_imu_->snapshot();
+    get_imu_ = [this](const rclcpp::Time & from, const rclcpp::Time & to) {
+        return local_imu_->average(from, to);
       };
     RCLCPP_INFO(
       logger_, "polka: source '%s' using per-source IMU on '%s'",
@@ -211,8 +211,7 @@ void SourceAdapter::populate_point_time(
 
 void SourceAdapter::deskew_cloud(
   CloudT & cloud,
-  const sensor_msgs::msg::PointCloud2 & raw_msg,
-  const AveragedImu & imu)
+  const sensor_msgs::msg::PointCloud2 & raw_msg)
 {
   size_t n = cloud.size();
   if (n == 0 || n != static_cast<size_t>(raw_msg.width) * raw_msg.height ||
@@ -220,6 +219,20 @@ void SourceAdapter::deskew_cloud(
   {
     return;
   }
+
+  const rclcpp::Time header_stamp(raw_msg.header.stamp);
+  const double header_sec = header_stamp.seconds();
+  const uint8_t * raw_data = raw_msg.data.data();
+  const uint32_t point_step = raw_msg.point_step;
+
+  // Motion averaged over this scan's own time span, so one shock sample after
+  // the scan (a bump, a rail gap) cannot skew every point.
+  const DtRange dt_range = point_time_dt_range(decoder_, raw_data, point_step, n, header_sec);
+  const auto imu_ptr = get_imu_(
+    header_stamp + rclcpp::Duration::from_seconds(dt_range.min),
+    header_stamp + rclcpp::Duration::from_seconds(dt_range.max));
+  if (!imu_ptr || !imu_ptr->valid) {return;}
+  const AveragedImu & imu = *imu_ptr;
 
   // Rotate IMU data from IMU frame into sensor frame (identity if same frame or TF unavailable)
   Eigen::Matrix3d R_imu_to_sensor = Eigen::Matrix3d::Identity();
@@ -239,10 +252,6 @@ void SourceAdapter::deskew_cloud(
 
   const Eigen::Vector3d angular_vel = R_imu_to_sensor * imu.angular_vel;
   const Eigen::Vector3d accel = R_imu_to_sensor * imu.linear_accel;
-  const double header_sec = rclcpp::Time(raw_msg.header.stamp).seconds();
-
-  const uint8_t * raw_data = raw_msg.data.data();
-  const uint32_t point_step = raw_msg.point_step;
 
   // Each point moves by the sensor motion between header time and its own capture
   // time (dt may be negative): p_header = exp(dt * twist) * p. angular_vel is one
@@ -261,7 +270,7 @@ void SourceAdapter::deskew_cloud(
   // Translation under this model is 0.5 * a * dt^2. When that stays below a
   // millimetre over the whole scan (any ground robot: 0.2 m/s^2 over 0.1 s gives
   // 1 mm), drop it and take the rotation-only path.
-  const double dt_max = point_time_max_abs_dt(decoder_, raw_data, point_step, n, header_sec);
+  const double dt_max = std::max(std::abs(dt_range.min), std::abs(dt_range.max));
   const bool rotation_only =
     0.5 * accel.norm() * dt_max * dt_max < kNegligibleTranslationM;
 
@@ -396,10 +405,7 @@ void SourceAdapter::pc2_callback(sensor_msgs::msg::PointCloud2::ConstSharedPtr m
 
   // Per-point deskewing (before filters, in sensor frame)
   if (deskew_enabled_ && has_timestamp_field_ && get_imu_) {
-    auto imu = get_imu_();
-    if (imu && imu->valid) {
-      deskew_cloud(*cloud, *msg, *imu);
-    }
+    deskew_cloud(*cloud, *msg);
   }
 
   const uint64_t points_raw = cloud->size();

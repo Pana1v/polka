@@ -31,6 +31,13 @@ namespace
 // Rotation-only deskew fast path: exact-compute the per-point rotation every this
 // many points, linearly interpolate the rest. See deskew_cloud() for the error bound.
 constexpr size_t kDeskewInterpStride = 16;
+// Largest angle the rotation-only path interpolates across before re-anchoring.
+constexpr double kMaxInterpAngleRad = 2e-3;
+// Scan-wide translation below this is dropped in favour of the rotation-only path.
+constexpr double kNegligibleTranslationM = 1e-3;
+// Below these, angular rate / per-point angle counts as zero.
+constexpr double kMinAngularRate = 1e-10;
+constexpr double kMinAngle = 1e-9;
 
 // True when 'data' actually holds every point the message claims, so walking it
 // by point_step cannot run off the end. Every raw-byte read of the per-point time
@@ -237,57 +244,92 @@ void SourceAdapter::deskew_cloud(
   const uint8_t * raw_data = raw_msg.data.data();
   const uint32_t point_step = raw_msg.point_step;
 
-  // Fast path: rotation-only (accel is exactly zeroed upstream whenever there is no
-  // IMU orientation to subtract gravity with, i.e. no translation twist for this whole
-  // scan) and a non-negligible angular rate. angular_vel is one fixed snapshot for the
-  // whole scan, so every point's rotation shares the same axis and its signed angle is
-  // exactly linear in dt. Exact-compute the rotation only at a coarse stride and
-  // linearly extrapolate the rest from the nearest anchor (first-order Rodrigues
-  // expansion around the anchor angle) instead of paying two trig calls per point.
+  // Each point moves by the sensor motion between header time and its own capture
+  // time (dt may be negative): p_header = exp(dt * twist) * p. angular_vel is one
+  // fixed snapshot for the whole scan, so every rotation shares one axis and its
+  // signed angle is exactly linear in dt.
+  //
+  // Per-point math runs in float, like the points themselves: dt is formed in
+  // double first, so only small, well-conditioned values are narrowed. Float
+  // sin/cos is what makes this about 2x cheaper than double.
   const double omega_mag = angular_vel.norm();
-  if (accel.squaredNorm() == 0.0 && omega_mag > 1e-10) {
-    const Eigen::Vector3d axis = angular_vel / omega_mag;
-    Eigen::Matrix3d R_anchor = Eigen::Matrix3d::Identity();
-    double theta_anchor = 0.0;
+  const Eigen::Vector3f axis = omega_mag > kMinAngularRate ?
+    Eigen::Vector3f((angular_vel / omega_mag).cast<float>()) : Eigen::Vector3f::UnitZ();
+  const float omega_f = static_cast<float>(omega_mag);
+  const Eigen::Vector3f half_accel = (0.5 * accel).cast<float>();
+
+  // Translation under this model is 0.5 * a * dt^2. When that stays below a
+  // millimetre over the whole scan (any ground robot: 0.2 m/s^2 over 0.1 s gives
+  // 1 mm), drop it and take the rotation-only path.
+  const double dt_max = point_time_max_abs_dt(decoder_, raw_data, point_step, n, header_sec);
+  const bool rotation_only =
+    0.5 * accel.norm() * dt_max * dt_max < kNegligibleTranslationM;
+
+  if (rotation_only) {
+    if (omega_mag <= kMinAngularRate) {return;}
+
+    // Exact rotation at a coarse stride, first-order Rodrigues expansion around the
+    // anchor in between: R(t) p ~= R(t_a) (p + (t - t_a) k x p). Error is about
+    // r * dtheta^2 / 2, so re-anchor whenever dtheta grows past kMaxInterpAngleRad
+    // (0.2 mm at 100 m), e.g. at a ring boundary in ring-major clouds.
+    Eigen::Matrix3f R_anchor = Eigen::Matrix3f::Identity();
+    float theta_anchor = 0.0f;
     bool have_anchor = false;
 
     for (size_t i = 0; i < n; ++i) {
       const double dt = decoder_.dt(raw_data + i * point_step, header_sec);
       if (std::abs(dt) < 1e-9) {continue;}
 
-      const double theta = -omega_mag * dt;
-      const Eigen::Vector3d p(cloud[i].x, cloud[i].y, cloud[i].z);
-      Eigen::Vector3d corrected;
+      const float theta = omega_f * static_cast<float>(dt);
+      const Eigen::Vector3f p(cloud[i].x, cloud[i].y, cloud[i].z);
+      Eigen::Vector3f corrected;
 
-      if (!have_anchor || (i % kDeskewInterpStride) == 0) {
-        R_anchor = Eigen::AngleAxisd(theta, axis).toRotationMatrix();
+      const bool reanchor = !have_anchor || (i % kDeskewInterpStride) == 0 ||
+        std::abs(theta - theta_anchor) > kMaxInterpAngleRad;
+      if (reanchor) {
+        R_anchor = Eigen::AngleAxisf(theta, axis).toRotationMatrix();
         theta_anchor = theta;
         have_anchor = true;
         corrected = R_anchor * p;
       } else {
-        const double delta_theta = theta - theta_anchor;
-        corrected = R_anchor * (p + delta_theta * axis.cross(p));
+        corrected = R_anchor * (p + (theta - theta_anchor) * axis.cross(p));
       }
 
-      cloud[i].x = static_cast<float>(corrected.x());
-      cloud[i].y = static_cast<float>(corrected.y());
-      cloud[i].z = static_cast<float>(corrected.z());
+      cloud[i].x = corrected.x();
+      cloud[i].y = corrected.y();
+      cloud[i].z = corrected.z();
     }
     return;
   }
 
-  // Fallback: exact per-point SE(3) computation. Used when translation is active
-  // (an IMU with usable orientation) or rotation is negligible for this scan.
+  // Full SE(3): R p + V rho about the fixed axis, in closed form (Rodrigues for R,
+  // left Jacobian for V), with rho = 0.5 * a * dt^2. Same result as
+  // compute_motion_delta(angular_vel, accel, dt) * p without building matrices.
+  // 1 - cos(theta) is taken as 2 sin^2(theta / 2) so small angles keep precision.
   for (size_t i = 0; i < n; ++i) {
     const double dt = decoder_.dt(raw_data + i * point_step, header_sec);
     if (std::abs(dt) < 1e-9) {continue;}
 
-    Eigen::Isometry3d delta = compute_motion_delta(angular_vel, accel, dt);
-    Eigen::Vector3d p(cloud[i].x, cloud[i].y, cloud[i].z);
-    Eigen::Vector3d corrected = delta.inverse() * p;
-    cloud[i].x = static_cast<float>(corrected.x());
-    cloud[i].y = static_cast<float>(corrected.y());
-    cloud[i].z = static_cast<float>(corrected.z());
+    const float dt_f = static_cast<float>(dt);
+    const Eigen::Vector3f p(cloud[i].x, cloud[i].y, cloud[i].z);
+    const Eigen::Vector3f rho = half_accel * (dt_f * dt_f);
+    const float theta = omega_f * dt_f;
+    Eigen::Vector3f corrected = p + rho;
+
+    if (std::abs(theta) > kMinAngle) {
+      const float sin_half = std::sin(0.5f * theta);
+      const float cos_half = std::cos(0.5f * theta);
+      const float s = 2.0f * sin_half * cos_half;
+      const float one_minus_c = 2.0f * sin_half * sin_half;
+      const Eigen::Vector3f k_x_p = axis.cross(p);
+      const Eigen::Vector3f k_x_rho = axis.cross(rho);
+      corrected += s * k_x_p + one_minus_c * axis.cross(k_x_p) +
+        (one_minus_c / theta) * k_x_rho + ((theta - s) / theta) * axis.cross(k_x_rho);
+    }
+
+    cloud[i].x = corrected.x();
+    cloud[i].y = corrected.y();
+    cloud[i].z = corrected.z();
   }
 }
 

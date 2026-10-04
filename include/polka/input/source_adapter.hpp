@@ -28,6 +28,7 @@
 #include "polka/types.hpp"
 #include "polka/diag/stat_counters.hpp"
 #include "polka/input/imu_buffer.hpp"
+#include "polka/input/odom_buffer.hpp"
 #include "polka/input/point_time_decoder.hpp"
 #include "polka/filters/i_filter.hpp"
 #include "polka/util/cloud_transport.hpp"
@@ -45,13 +46,18 @@ public:
   // IMU state over [from, to], the span of one scan.
   using ImuGetter = std::function<std::shared_ptr<const AveragedImu>(
         const rclcpp::Time & from, const rclcpp::Time & to)>;
+  // Body twist over [from, to], for TranslationMode::ODOMETRY.
+  using TwistGetter = std::function<std::shared_ptr<const BodyTwist>(
+        const rclcpp::Time & from, const rclcpp::Time & to)>;
 
   SourceAdapter(
     rclcpp::Node * node, const SourceConfig & config, bool gpu_filters = false,
     ImuGetter imu_getter = nullptr, bool deskew_enabled = false,
     const std::string & timestamp_field_hint = "auto",
     std::shared_ptr<tf2_ros::Buffer> tf_buffer = nullptr,
-    int imu_buffer_size = 200);
+    int imu_buffer_size = 200,
+    TranslationMode translation = TranslationMode::IMU_ACCEL,
+    TwistGetter twist_getter = nullptr);
 
   CloudT::ConstPtr get_latest() const;
   bool is_stale(double timeout_sec, const rclcpp::Time & now) const;
@@ -85,6 +91,10 @@ private:
   // Fill each point's 'time' field with its absolute acquisition time (Unix sec).
   void populate_point_time(CloudT & cloud, const sensor_msgs::msg::PointCloud2 & raw_msg);
   void deskew_cloud(CloudT & cloud, const sensor_msgs::msg::PointCloud2 & raw_msg);
+  // Velocity of this sensor's origin, in its own frame, from the odometry twist.
+  // Zero (rotation-only deskew) when the twist or its TF is unavailable.
+  Eigen::Vector3d sensor_velocity(
+    const std::string & sensor_frame, const rclcpp::Time & from, const rclcpp::Time & to);
 
   rclcpp::Node * node_;
   SourceConfig config_;
@@ -112,6 +122,8 @@ private:
 
   // Deskewing state
   ImuGetter get_imu_;
+  TwistGetter get_twist_;
+  TranslationMode translation_{TranslationMode::IMU_ACCEL};
   bool deskew_enabled_{false};
   std::string timestamp_field_hint_{"auto"};
   bool timestamp_field_detected_{false};

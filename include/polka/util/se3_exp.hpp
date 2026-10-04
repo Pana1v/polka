@@ -83,21 +83,43 @@ inline Eigen::Isometry3d se3_exp(
   return T;
 }
 
-/// Constant-acceleration + constant-angular-velocity motion model.
-///   angular_vel: body-frame angular velocity ω (rad/s)
-///   accel:       body-frame linear acceleration a (m/s²)
+/// Constant-velocity + constant-acceleration + constant-angular-velocity motion model.
+///   angular_vel: body-frame angular velocity w (rad/s)
+///   velocity:    body-frame linear velocity v at dt = 0 (m/s)
+///   accel:       body-frame linear acceleration a (m/s^2)
 ///   dt:          time offset from reference (seconds, can be negative)
 /// Returns the SE(3) pose delta representing sensor motion over dt.
-///   Translation: ρ = ½ a dt²   (no velocity term — IMU provides accel only)
-///   Rotation:    φ = ω dt
+///   Translation: rho = v dt + 1/2 a dt^2   (as rko_lio: dt times the mean velocity)
+///   Rotation:    phi = w dt
+inline Eigen::Isometry3d compute_motion_delta(
+  const Eigen::Vector3d & angular_vel,
+  const Eigen::Vector3d & velocity,
+  const Eigen::Vector3d & accel,
+  double dt)
+{
+  Eigen::Vector3d rho = (velocity + accel * (0.5 * dt)) * dt;
+  Eigen::Vector3d phi = angular_vel * dt;
+  return se3_exp(rho, phi);
+}
+
+/// Same, starting from rest: rho = 1/2 a dt^2.
 inline Eigen::Isometry3d compute_motion_delta(
   const Eigen::Vector3d & angular_vel,
   const Eigen::Vector3d & accel,
   double dt)
 {
-  Eigen::Vector3d rho = accel * (0.5 * dt * dt);
-  Eigen::Vector3d phi = angular_vel * dt;
-  return se3_exp(rho, phi);
+  return compute_motion_delta(angular_vel, Eigen::Vector3d::Zero(), accel, dt);
+}
+
+/// Velocity of frame s's origin, expressed in s, on a rigid body moving with
+/// twist (v_b, w_b) given in frame b. T_bs is the pose of s in b. The lever arm
+/// matters: a lidar 0.6 m off the axis of a robot turning at 0.6 rad/s moves at
+/// 0.36 m/s with the base itself standing still.
+///   v_s = R_bs^T (v_b + w_b x t_bs)
+inline Eigen::Vector3d velocity_at_frame(
+  const Eigen::Vector3d & v_b, const Eigen::Vector3d & w_b, const Eigen::Isometry3d & T_bs)
+{
+  return T_bs.linear().transpose() * (v_b + w_b.cross(T_bs.translation()));
 }
 
 }  // namespace polka

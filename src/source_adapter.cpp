@@ -18,6 +18,7 @@
 
 #include <cstring>
 
+#include "polka/util/log_format.hpp"
 #include "polka/util/se3_exp.hpp"
 #include "polka/filters/filter_chain.hpp"
 #include <sensor_msgs/msg/point_field.hpp>
@@ -35,6 +36,9 @@ constexpr size_t kDeskewInterpStride = 16;
 constexpr double kMaxInterpAngleRad = 2e-3;
 // Scan-wide translation below this is dropped in favour of the rotation-only path.
 constexpr double kNegligibleTranslationM = 1e-3;
+// Largest translation error the SE(3) path accepts from holding the translation
+// Jacobian V between anchors (about dtheta * |rho| / 2).
+constexpr double kMaxInterpTranslationErrM = 1e-4;
 // Below these, angular rate / per-point angle counts as zero.
 constexpr double kMinAngularRate = 1e-10;
 constexpr double kMinAngle = 1e-9;
@@ -54,9 +58,12 @@ SourceAdapter::SourceAdapter(
   ImuGetter imu_getter, bool deskew_enabled,
   const std::string & timestamp_field_hint,
   std::shared_ptr<tf2_ros::Buffer> tf_buffer,
-  int imu_buffer_size)
+  int imu_buffer_size,
+  TranslationMode translation,
+  TwistGetter twist_getter)
 : node_(node), config_(config), logger_(node->get_logger()), gpu_filters_(gpu_filters),
-  get_imu_(std::move(imu_getter)), deskew_enabled_(deskew_enabled),
+  get_imu_(std::move(imu_getter)), get_twist_(std::move(twist_getter)),
+  translation_(translation), deskew_enabled_(deskew_enabled),
   timestamp_field_hint_(timestamp_field_hint), tf_buffer_(std::move(tf_buffer))
 {
   // Per-source IMU: if configured, create a local buffer and override the getter
@@ -228,9 +235,9 @@ void SourceAdapter::deskew_cloud(
   // Motion averaged over this scan's own time span, so one shock sample after
   // the scan (a bump, a rail gap) cannot skew every point.
   const DtRange dt_range = point_time_dt_range(decoder_, raw_data, point_step, n, header_sec);
-  const auto imu_ptr = get_imu_(
-    header_stamp + rclcpp::Duration::from_seconds(dt_range.min),
-    header_stamp + rclcpp::Duration::from_seconds(dt_range.max));
+  const rclcpp::Time scan_from = header_stamp + rclcpp::Duration::from_seconds(dt_range.min);
+  const rclcpp::Time scan_to = header_stamp + rclcpp::Duration::from_seconds(dt_range.max);
+  const auto imu_ptr = get_imu_(scan_from, scan_to);
   if (!imu_ptr || !imu_ptr->valid) {return;}
   const AveragedImu & imu = *imu_ptr;
 
@@ -251,7 +258,20 @@ void SourceAdapter::deskew_cloud(
   }
 
   const Eigen::Vector3d angular_vel = R_imu_to_sensor * imu.angular_vel;
-  const Eigen::Vector3d accel = R_imu_to_sensor * imu.linear_accel;
+
+  // Translation source. Exactly one of velocity / accel is non-zero.
+  Eigen::Vector3d velocity = Eigen::Vector3d::Zero();
+  Eigen::Vector3d accel = Eigen::Vector3d::Zero();
+  switch (translation_) {
+    case TranslationMode::NONE:
+      break;
+    case TranslationMode::IMU_ACCEL:
+      accel = R_imu_to_sensor * imu.linear_accel;
+      break;
+    case TranslationMode::ODOMETRY:
+      velocity = sensor_velocity(raw_msg.header.frame_id, scan_from, scan_to);
+      break;
+  }
 
   // Each point moves by the sensor motion between header time and its own capture
   // time (dt may be negative): p_header = exp(dt * twist) * p. angular_vel is one
@@ -265,14 +285,15 @@ void SourceAdapter::deskew_cloud(
   const Eigen::Vector3f axis = omega_mag > kMinAngularRate ?
     Eigen::Vector3f((angular_vel / omega_mag).cast<float>()) : Eigen::Vector3f::UnitZ();
   const float omega_f = static_cast<float>(omega_mag);
+  const Eigen::Vector3f velocity_f = velocity.cast<float>();
   const Eigen::Vector3f half_accel = (0.5 * accel).cast<float>();
 
-  // Translation under this model is 0.5 * a * dt^2. When that stays below a
-  // millimetre over the whole scan (any ground robot: 0.2 m/s^2 over 0.1 s gives
+  // Translation under this model is v * dt + 0.5 * a * dt^2. When that stays
+  // below a millimetre over the whole scan (0.2 m/s^2 from rest over 0.1 s gives
   // 1 mm), drop it and take the rotation-only path.
   const double dt_max = std::max(std::abs(dt_range.min), std::abs(dt_range.max));
   const bool rotation_only =
-    0.5 * accel.norm() * dt_max * dt_max < kNegligibleTranslationM;
+    velocity.norm() * dt_max + 0.5 * accel.norm() * dt_max * dt_max < kNegligibleTranslationM;
 
   if (rotation_only) {
     if (omega_mag <= kMinAngularRate) {return;}
@@ -311,12 +332,15 @@ void SourceAdapter::deskew_cloud(
     return;
   }
 
-  // Full SE(3): p_header = R(theta) p + V(theta) rho, with rho = 0.5 * a * dt^2,
-  // R by Rodrigues and V the SO(3) left Jacobian, both about the fixed axis. Same
-  // anchoring as the rotation-only path: R and V exact at anchors, and in between
+  // Full SE(3): p_header = R(theta) p + V(theta) rho, with
+  // rho = v * dt + 0.5 * a * dt^2, R by Rodrigues and V the SO(3) left Jacobian,
+  // both about the fixed axis. Same anchoring as the rotation-only path: R and V
+  // exact at anchors, and in between
   //   R(theta) p ~= R_a (p + dtheta k x p),   V(theta) rho ~= V_a rho.
-  // The V shortcut errs by about dtheta * |rho| / 2: under 0.1 mm for any
-  // acceleration below 100 m/s^2. rho itself stays exact per point.
+  // The V shortcut errs by about dtheta * |rho| / 2, so also re-anchor once that
+  // passes kMaxInterpTranslationErrM: never on a ground robot (|rho| of
+  // centimetres), every few points at road speed (|rho| of metres).
+  // rho itself stays exact per point.
   // 1 - cos(theta) is taken as 2 sin^2(theta / 2) so small angles keep precision.
   const Eigen::Matrix3f K = (Eigen::Matrix3f() <<
     0.0f, -axis.z(), axis.y(),
@@ -328,6 +352,12 @@ void SourceAdapter::deskew_cloud(
   float theta_anchor = 0.0f;
   bool have_anchor = false;
 
+  // Bound dtheta so the V shortcut stays under kMaxInterpTranslationErrM for the
+  // largest |rho| in the scan. Leaves kMaxInterpAngleRad in charge below ~0.1 m.
+  const double rho_max = velocity.norm() * dt_max + 0.5 * accel.norm() * dt_max * dt_max;
+  const float max_interp_angle = static_cast<float>(
+    std::min(kMaxInterpAngleRad, 2.0 * kMaxInterpTranslationErrM / rho_max));
+
   for (size_t i = 0; i < n; ++i) {
     const double dt = decoder_.dt(raw_data + i * point_step, header_sec);
     if (std::abs(dt) < 1e-9) {continue;}
@@ -335,10 +365,10 @@ void SourceAdapter::deskew_cloud(
     const float dt_f = static_cast<float>(dt);
     const float theta = omega_f * dt_f;
     const Eigen::Vector3f p(cloud[i].x, cloud[i].y, cloud[i].z);
-    const Eigen::Vector3f rho = half_accel * (dt_f * dt_f);
+    const Eigen::Vector3f rho = (velocity_f + half_accel * dt_f) * dt_f;
 
     const bool reanchor = !have_anchor || (i % kDeskewInterpStride) == 0 ||
-      std::abs(theta - theta_anchor) > kMaxInterpAngleRad;
+      std::abs(theta - theta_anchor) > max_interp_angle;
     if (reanchor) {
       R_anchor.setIdentity();
       V_anchor.setIdentity();
@@ -361,6 +391,38 @@ void SourceAdapter::deskew_cloud(
     cloud[i].y = corrected.y();
     cloud[i].z = corrected.z();
   }
+}
+
+Eigen::Vector3d SourceAdapter::sensor_velocity(
+  const std::string & sensor_frame, const rclcpp::Time & from, const rclcpp::Time & to)
+{
+  const auto twist = get_twist_ ? get_twist_(from, to) : nullptr;
+  if (!twist || !twist->valid) {
+    RCLCPP_WARN_THROTTLE(
+      logger_, *node_->get_clock(), kLogThrottleNormalMs,
+      "polka: source '%s' has no fresh odometry twist, deskewing rotation only",
+      config_.name.c_str());
+    return Eigen::Vector3d::Zero();
+  }
+
+  // Pose of the sensor in the twist's frame, for its rotation and lever arm.
+  Eigen::Isometry3d T_twist_sensor = Eigen::Isometry3d::Identity();
+  if (!twist->frame_id.empty() && twist->frame_id != sensor_frame) {
+    try {
+      if (!tf_buffer_) {throw tf2::LookupException("no TF buffer");}
+      T_twist_sensor = tf2::transformToEigen(
+        tf_buffer_->lookupTransform(twist->frame_id, sensor_frame, tf2::TimePointZero));
+    } catch (const tf2::TransformException & ex) {
+      // A twist in the wrong frame would push points the wrong way: skip it.
+      RCLCPP_WARN_THROTTLE(
+        logger_, *node_->get_clock(), kLogThrottleNormalMs,
+        "polka: source '%s' cannot place odometry frame '%s' (%s), deskewing rotation only",
+        config_.name.c_str(), twist->frame_id.c_str(), ex.what());
+      return Eigen::Vector3d::Zero();
+    }
+  }
+
+  return velocity_at_frame(twist->linear, twist->angular, T_twist_sensor);
 }
 
 void SourceAdapter::apply_filters(CloudT & cloud)

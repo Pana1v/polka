@@ -13,6 +13,7 @@
 // limitations under the License.
 
 #include <gtest/gtest.h>
+#include <tf2_ros/transform_broadcaster.h>
 
 #include <array>
 #include <chrono>
@@ -21,6 +22,7 @@
 #include <thread>
 #include <vector>
 
+#include <geometry_msgs/msg/transform_stamped.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/msg/point_cloud2.hpp>
 #include <sensor_msgs/point_cloud2_iterator.hpp>
@@ -36,10 +38,11 @@ namespace
 {
 
 sensor_msgs::msg::PointCloud2 make_cloud(
-  const std::vector<std::array<float, 3>> & points, const rclcpp::Time & stamp)
+  const std::vector<std::array<float, 3>> & points, const rclcpp::Time & stamp,
+  const std::string & frame = "base_link")  // default: target frame, TF is identity
 {
   sensor_msgs::msg::PointCloud2 msg;
-  msg.header.frame_id = "base_link";  // target frame: TF lookup is identity
+  msg.header.frame_id = frame;
   msg.header.stamp = stamp;
   msg.height = 1;
   msg.width = points.size();
@@ -230,6 +233,46 @@ TEST_F(RuntimeReconfigureTest, MotionCompToggleThenTrafficDoesNotCrash)
   pub->publish(make_cloud({{{1.0f, 0.0f, 0.0f}}}, node_->now()));
   spin_for(300ms);  // would crash here before the fix
   SUCCEED();
+}
+
+
+TEST_F(RuntimeReconfigureTest, MergeUsesMountPoseAtCloudStamp)
+{
+  // A lidar on a steering joint: its mount yaws 0.5 rad between the cloud's stamp
+  // and the merge. The cloud must be placed with the mount pose of its own stamp,
+  // not the newest one, or every point swings about the joint.
+  constexpr double kYawLater = 0.5;     // rad, newest mount yaw
+  constexpr double kLaterSec = 0.1;     // s after the cloud stamp
+  constexpr float kRange = 2.0f;        // m, point straight ahead of the lidar
+  const rclcpp::Time stamp = node_->now();
+
+  tf2_ros::TransformBroadcaster tf_pub(*helper_);
+  auto mount = [&](const rclcpp::Time & t, double yaw) {
+      geometry_msgs::msg::TransformStamped m;
+      m.header.stamp = t;
+      m.header.frame_id = "base_link";
+      m.child_frame_id = "arm_lidar";
+      m.transform.rotation.z = std::sin(yaw / 2);
+      m.transform.rotation.w = std::cos(yaw / 2);
+      tf_pub.sendTransform(m);
+    };
+  mount(stamp - rclcpp::Duration::from_seconds(kLaterSec), 0.0);
+  mount(stamp, 0.0);
+  mount(stamp + rclcpp::Duration::from_seconds(kLaterSec), kYawLater);
+  spin_for(200ms);
+
+  sensor_msgs::msg::PointCloud2::SharedPtr merged;
+  auto sub = helper_->create_subscription<sensor_msgs::msg::PointCloud2>(
+    "/merged_test", 10,
+    [&merged](sensor_msgs::msg::PointCloud2::SharedPtr msg) {merged = msg;});
+  auto pub = helper_->create_publisher<sensor_msgs::msg::PointCloud2>("/t1", 10);
+  pub->publish(make_cloud({{{kRange, 0.0f, 0.0f}}}, stamp, "arm_lidar"));
+  ASSERT_TRUE(spin_until([&]() {return merged != nullptr;}, 3000ms));
+  ASSERT_EQ(merged->width, 1u);
+
+  sensor_msgs::PointCloud2ConstIterator<float> ix(*merged, "x"), iy(*merged, "y");
+  EXPECT_NEAR(*ix, kRange, 1e-3);
+  EXPECT_NEAR(*iy, 0.0, 1e-3);
 }
 
 }  // namespace polka

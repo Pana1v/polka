@@ -25,16 +25,19 @@
 #include <Eigen/Geometry>
 #include <tf2_ros/buffer.h>
 
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <cstring>
 #include <functional>
+#include <iostream>
 #include <map>
 #include <memory>
 #include <numeric>
 #include <random>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 #include <nav_msgs/msg/odometry.hpp>
@@ -70,6 +73,7 @@ constexpr size_t kSweepRows = 64;      // vertically sweeping solid-state lidar
 constexpr size_t kSweepCols = 125;
 constexpr double kScanPeriod = 0.1;   // 10 Hz lidar
 constexpr double kTolerance = 1e-3;   // 1 mm, well under any real skew below
+constexpr double kNoOutput = 1e9;     // error reported when the adapter returned nothing
 const rclcpp::Time kHeaderStamp(1700000000, 0, RCL_ROS_TIME);
 
 struct Scan
@@ -207,6 +211,8 @@ BodyTwist make_twist(const Eigen::Vector3d & v, const Eigen::Vector3d & w, const
 constexpr char kRealBag[] = POLKA_TEST_DATA "/airy_turn.mcap";
 constexpr char kRealLidar[] = "/pointcloud/airy_rear";
 constexpr char kRealImu[] = "/imu/airy_rear";
+constexpr char kRealFrontLidar[] = "/pointcloud/airy_front";
+constexpr char kRealFrontImu[] = "/imu/airy_front";
 constexpr char kRealOdom[] = "/articulated_steering_controller/odom";
 
 struct RealData
@@ -215,6 +221,7 @@ struct RealData
   std::vector<sensor_msgs::msg::Imu> imu;
   std::vector<nav_msgs::msg::Odometry> odom;
   std::vector<geometry_msgs::msg::TransformStamped> tf_static;
+  std::vector<geometry_msgs::msg::TransformStamped> tf;   // articulation joint
 };
 
 template<typename T>
@@ -226,7 +233,7 @@ T decode(const rosbag2_storage::SerializedBagMessage & bag_msg)
   return msg;
 }
 
-RealData read_real_bag()
+RealData read_real_bag(const char * lidar_topic = kRealLidar, const char * imu_topic = kRealImu)
 {
   rosbag2_storage::StorageOptions options;
   options.uri = kRealBag;
@@ -237,15 +244,19 @@ RealData read_real_bag()
   RealData d;
   while (reader.has_next()) {
     const auto m = reader.read_next();
-    if (m->topic_name == kRealLidar) {
+    if (m->topic_name == lidar_topic) {
       d.clouds.push_back(decode<sensor_msgs::msg::PointCloud2>(*m));
-    } else if (m->topic_name == kRealImu) {
+    } else if (m->topic_name == imu_topic) {
       d.imu.push_back(decode<sensor_msgs::msg::Imu>(*m));
     } else if (m->topic_name == kRealOdom) {
       d.odom.push_back(decode<nav_msgs::msg::Odometry>(*m));
     } else if (m->topic_name == "/tf_static") {
       for (const auto & t : decode<tf2_msgs::msg::TFMessage>(*m).transforms) {
         d.tf_static.push_back(t);
+      }
+    } else if (m->topic_name == "/tf") {
+      for (const auto & t : decode<tf2_msgs::msg::TFMessage>(*m).transforms) {
+        d.tf.push_back(t);
       }
     }
   }
@@ -255,6 +266,76 @@ RealData read_real_bag()
 double stamp_sec(const builtin_interfaces::msg::Time & t)
 {
   return rclcpp::Time(t).seconds();
+}
+
+// Per-point times of a real scan, relative to its header.
+std::vector<double> point_dts(const sensor_msgs::msg::PointCloud2 & msg)
+{
+  const double header = stamp_sec(msg.header.stamp);
+  std::vector<double> dt;
+  for (sensor_msgs::PointCloud2ConstIterator<double> it(msg, "timestamp"); it != it.end(); ++it) {
+    dt.push_back(*it - header);
+  }
+  return dt;
+}
+
+// Mean gyro (IMU frame) over [from, to], relative to 'header'. Invalid if < 2 samples.
+AveragedImu scan_imu(const RealData & d, double header, double from, double to)
+{
+  AveragedImu imu;
+  int n = 0;
+  for (const auto & m : d.imu) {
+    const double t = stamp_sec(m.header.stamp) - header;
+    if (t < from || t > to) {continue;}
+    imu.angular_vel += Eigen::Vector3d(
+      m.angular_velocity.x, m.angular_velocity.y, m.angular_velocity.z);
+    imu.frame_id = m.header.frame_id;
+    ++n;
+  }
+  imu.valid = n >= 2;
+  if (n > 0) {imu.angular_vel /= n;}
+  return imu;
+}
+
+// Mean odometry twist (child frame) over [from, to], relative to 'header'.
+BodyTwist scan_twist(const RealData & d, double header, double from, double to)
+{
+  BodyTwist twist;
+  int n = 0;
+  for (const auto & m : d.odom) {
+    const double t = stamp_sec(m.header.stamp) - header;
+    if (t < from || t > to) {continue;}
+    const auto & tw = m.twist.twist;
+    twist.linear += Eigen::Vector3d(tw.linear.x, tw.linear.y, tw.linear.z);
+    twist.angular += Eigen::Vector3d(tw.angular.x, tw.angular.y, tw.angular.z);
+    twist.frame_id = m.child_frame_id;
+    ++n;
+  }
+  twist.valid = n >= 1;
+  if (n > 0) {
+    twist.linear /= n;
+    twist.angular /= n;
+  }
+  return twist;
+}
+
+// Max distance from polka's output to the exact SE(3) deskew under twist (w, v), and
+// the largest truth displacement (the scan's real skew), both in metres.
+std::pair<double, double> real_errors(
+  const sensor_msgs::msg::PointCloud2 & msg, const std::vector<double> & dt,
+  const CloudT & out, const Eigen::Vector3d & w, const Eigen::Vector3d & v)
+{
+  double worst = 0.0, moved = 0.0;
+  size_t i = 0;
+  for (sensor_msgs::PointCloud2ConstIterator<float> it(msg, "x"); it != it.end(); ++it, ++i) {
+    const Eigen::Vector3d p(it[0], it[1], it[2]);
+    if (!p.allFinite()) {continue;}
+    const Eigen::Vector3d truth = compute_motion_delta(w, v, Eigen::Vector3d::Zero(), dt[i]) * p;
+    const Eigen::Vector3d got(out[i].x, out[i].y, out[i].z);
+    worst = std::max(worst, (got - truth).norm());
+    moved = std::max(moved, (truth - p).norm());
+  }
+  return {worst, moved};
 }
 
 }  // namespace
@@ -373,6 +454,55 @@ protected:
       std::this_thread::sleep_for(10ms);
     }
     return adapter.received() ? adapter.get_latest() : nullptr;
+  }
+
+  // Center-steered vehicle, numbers from the polka#2 rig: the lidar rides 0.636 m
+  // ahead of the steering pin on a front body that yaws at 0.5 rad/s, while the rear
+  // body (where odometry reports) drives at 0.45 m/s turning at 0.3 rad/s. The joint
+  // alone moves the lidar at 0.32 m/s, and odometry never sees it: only the TF chain
+  // does. Joint TF is streamed at 100 Hz from the scan start until 'tf_lag' before
+  // its end, as robot_state_publisher lags a live lidar. Returns max error, m.
+  double articulated_error(double tf_lag)
+  {
+    constexpr double kJointRate = 0.5;     // rad/s
+    constexpr double kJointStart = 0.2;    // rad at header time
+    constexpr double kLever = 0.636;       // m, pin to lidar
+    constexpr double kTfStep = 0.01;       // s between joint TF samples
+    constexpr double kHalfScan = 0.5 * kScanPeriod;
+    const Eigen::Vector3d v_base(0.45, 0.0, 0.0);
+    const Eigen::Vector3d w_base(0.0, 0.0, 0.3);
+
+    // Pose of the lidar in the rear body at the joint angle of time dt.
+    auto base_to_lidar = [&](double dt) {
+        Eigen::Isometry3d T = Eigen::Isometry3d::Identity();
+        T.rotate(Eigen::AngleAxisd(kJointStart + kJointRate * dt, Eigen::Vector3d::UnitZ()));
+        T.translate(Eigen::Vector3d(kLever, 0.0, 0.5));
+        return T;
+      };
+
+    auto tf = std::make_shared<tf2_ros::Buffer>(node_->get_clock());
+    for (double t = -kHalfScan - kScanPeriod; t <= kHalfScan - tf_lag + 1e-9; t += kTfStep) {
+      geometry_msgs::msg::TransformStamped tf_msg = tf2::eigenToTransform(base_to_lidar(t));
+      tf_msg.header.stamp = kHeaderStamp + rclcpp::Duration::from_seconds(t);
+      tf_msg.header.frame_id = "base_link";
+      tf_msg.child_frame_id = "lidar";
+      tf->setTransform(tf_msg, "test", false);
+    }
+
+    // Truth: rear body on a constant twist, lidar carried through the moving joint.
+    // Scan centred on the header, since the joint's sweep is not a constant twist.
+    const auto scan = make_scan(
+      -kHalfScan, [&](double dt) {
+        return base_to_lidar(0.0).inverse() * twist_motion(w_base, v_base, dt) *
+        base_to_lidar(dt);
+      });
+
+    const Eigen::Vector3d w_lidar(0.0, 0.0, w_base.z() + kJointRate);
+    const auto out = deskew(
+      scan, w_lidar, Eigen::Vector3d::Zero(), TranslationMode::ODOMETRY,
+      make_twist(v_base, w_base, "base_link"), tf);
+    if (!out || out->size() != kPoints) {return kNoOutput;}
+    return max_error(*out, scan);
   }
 
   static double max_error(const CloudT & cloud, const Scan & scan)
@@ -597,6 +727,22 @@ TEST_F(DeskewTest, OdometryLeverArmLandsOnTruth)
   EXPECT_LT(max_error(*out, scan), kTolerance);
 }
 
+TEST_F(DeskewTest, ArticulatedLeverArmLandsOnTruth)
+{
+  const double error = articulated_error(0.0);
+  RecordProperty("max_error_mm", std::to_string(error * 1e3));
+  EXPECT_LT(error, kTolerance);
+}
+
+TEST_F(DeskewTest, ArticulatedLaggingTfLandsOnTruth)
+{
+  // Joint TF stops 50 ms before the scan ends: the rate comes from the newest
+  // scan-long window instead, the same at a steady joint rate.
+  const double error = articulated_error(0.05);
+  RecordProperty("max_error_mm", std::to_string(error * 1e3));
+  EXPECT_LT(error, kTolerance);
+}
+
 TEST_F(DeskewTest, FlippedImuFrameFirstScanLandsOnTruth)
 {
   // IMU mounted upside down relative to the lidar (NED-style, 180 deg about x), as
@@ -633,43 +779,14 @@ TEST_F(DeskewTest, RealTurningScanMatchesExactDeskew)
   ASSERT_FALSE(d.tf_static.empty());
   const auto & msg = d.clouds[d.clouds.size() / 2];
   const double header = stamp_sec(msg.header.stamp);
-
-  // Exact per-point times, for the scan window and the reference.
-  std::vector<double> dt;
-  for (sensor_msgs::PointCloud2ConstIterator<double> it(msg, "timestamp"); it != it.end(); ++it) {
-    dt.push_back(*it - header);
-  }
+  const std::vector<double> dt = point_dts(msg);
   const auto [dt_min, dt_max] = std::minmax_element(dt.begin(), dt.end());
 
   // Motion over the scan: IMU mean (in the IMU frame), odometry mean (base frame).
-  AveragedImu imu;
-  int imu_n = 0;
-  for (const auto & m : d.imu) {
-    const double t = stamp_sec(m.header.stamp) - header;
-    if (t < *dt_min || t > *dt_max) {continue;}
-    imu.angular_vel += Eigen::Vector3d(
-      m.angular_velocity.x, m.angular_velocity.y, m.angular_velocity.z);
-    imu.frame_id = m.header.frame_id;
-    ++imu_n;
-  }
-  ASSERT_GE(imu_n, 2);
-  imu.angular_vel /= imu_n;
-  imu.valid = true;
-
-  BodyTwist twist;
-  int odom_n = 0;
-  for (const auto & m : d.odom) {
-    const double t = stamp_sec(m.header.stamp) - header;
-    if (t < *dt_min || t > *dt_max) {continue;}
-    const auto & tw = m.twist.twist;
-    twist.linear += Eigen::Vector3d(tw.linear.x, tw.linear.y, tw.linear.z);
-    twist.angular += Eigen::Vector3d(tw.angular.x, tw.angular.y, tw.angular.z);
-    twist.frame_id = m.child_frame_id;
-    ++odom_n;
-  }
-  ASSERT_GE(odom_n, 1);
-  twist.linear /= odom_n;
-  twist.angular /= odom_n;
+  const AveragedImu imu = scan_imu(d, header, *dt_min, *dt_max);
+  ASSERT_TRUE(imu.valid);
+  const BodyTwist twist = scan_twist(d, header, *dt_min, *dt_max);
+  ASSERT_TRUE(twist.valid);
 
   auto tf = std::make_shared<tf2_ros::Buffer>(node_->get_clock());
   for (const auto & t : d.tf_static) {
@@ -688,16 +805,74 @@ TEST_F(DeskewTest, RealTurningScanMatchesExactDeskew)
   ASSERT_TRUE(out) << "adapter received nothing";
   ASSERT_EQ(out->size(), dt.size());
 
-  double worst = 0.0, moved = 0.0;
-  size_t i = 0;
-  for (sensor_msgs::PointCloud2ConstIterator<float> it(msg, "x"); it != it.end(); ++it, ++i) {
-    const Eigen::Vector3d p(it[0], it[1], it[2]);
-    if (!p.allFinite()) {continue;}
-    const Eigen::Vector3d truth = compute_motion_delta(w, v, Eigen::Vector3d::Zero(), dt[i]) * p;
-    const Eigen::Vector3d got((*out)[i].x, (*out)[i].y, (*out)[i].z);
-    worst = std::max(worst, (got - truth).norm());
-    moved = std::max(moved, (truth - p).norm());
+  const auto [worst, moved] = real_errors(msg, dt, *out, w, v);
+  EXPECT_GT(moved, 0.05) << "fixture scan should carry real skew";
+  EXPECT_LT(worst, kTolerance);
+}
+
+TEST_F(DeskewTest, RealArticulatedScanMatchesExactDeskew)
+{
+  // The front lidar of the same rig rides the steering joint, which swings through
+  // 25 deg at up to 1 rad/s in this fixture. Odometry reports the rear body only:
+  // the lidar's own velocity must add the joint's rate from the TF chain, sampled
+  // as a live node would see it (TF only up to the scan's end).
+  const RealData d = read_real_bag(kRealFrontLidar, kRealFrontImu);
+  ASSERT_FALSE(d.clouds.empty());
+  ASSERT_FALSE(d.tf.empty());
+  const auto & msg = d.clouds[d.clouds.size() / 2];
+  const double header = stamp_sec(msg.header.stamp);
+  const std::vector<double> dt = point_dts(msg);
+  const auto [dt_min, dt_max] = std::minmax_element(dt.begin(), dt.end());
+
+  const AveragedImu imu = scan_imu(d, header, *dt_min, *dt_max);
+  ASSERT_TRUE(imu.valid);
+  const BodyTwist twist = scan_twist(d, header, *dt_min, *dt_max);
+  ASSERT_TRUE(twist.valid);
+
+  auto tf = std::make_shared<tf2_ros::Buffer>(node_->get_clock());
+  for (const auto & t : d.tf_static) {
+    tf->setTransform(t, "bag", true);
   }
+  for (const auto & t : d.tf) {
+    if (stamp_sec(t.header.stamp) - header > *dt_max) {continue;}
+    tf->setTransform(t, "bag", false);
+  }
+
+  // Reference velocity, in double: lever arm and its rate over a scan-long window
+  // ending at the scan's end or the newest joint TF before it.
+  const std::string & base = twist.frame_id;
+  const std::string & lidar = msg.header.frame_id;
+  const rclcpp::Time newest(tf->lookupTransform(base, lidar, tf2::TimePointZero).header.stamp);
+  const rclcpp::Time scan_end =
+    rclcpp::Time(msg.header.stamp) + rclcpp::Duration::from_seconds(*dt_max);
+  const double span = *dt_max - *dt_min;
+  const rclcpp::Time t2 = std::min(scan_end, newest);
+  auto pose_at = [&](const rclcpp::Time & t) {
+      return tf2::transformToEigen(tf->lookupTransform(base, lidar, tf2_ros::fromRclcpp(t)));
+    };
+  const Eigen::Isometry3d T1 = pose_at(t2 - rclcpp::Duration::from_seconds(span));
+  const Eigen::Isometry3d T2 = pose_at(t2);
+  const Eigen::Isometry3d T_mid = pose_at(t2 - rclcpp::Duration::from_seconds(span / 2));
+  const Eigen::Vector3d joint_rate = (T2.translation() - T1.translation()) / span;
+  const Eigen::Vector3d v_rigid = velocity_at_frame(twist.linear, twist.angular, pose_at(newest));
+  const Eigen::Vector3d v = velocity_at_frame(twist.linear, twist.angular, T_mid) +
+    T_mid.linear().transpose() * joint_rate;
+  RecordProperty("lidar_speed_rigid_mps", std::to_string(v_rigid.norm()));
+  RecordProperty("lidar_speed_with_joint_mps", std::to_string(v.norm()));
+  std::cout << "front lidar speed: rigid lever arm " << v_rigid.norm() << " m/s, with joint " <<
+    v.norm() << " m/s" << std::endl;
+  EXPECT_GT((v - v_rigid).norm(), 0.1) << "fixture scan should carry real joint motion";
+
+  const Eigen::Matrix3d R_lidar_imu = tf2::transformToEigen(
+    tf->lookupTransform(lidar, imu.frame_id, tf2::TimePointZero)).rotation();
+  const Eigen::Vector3d w = R_lidar_imu * imu.angular_vel;
+
+  const auto out = deskew_msg(msg, imu, TranslationMode::ODOMETRY, twist, tf);
+  ASSERT_TRUE(out) << "adapter received nothing";
+  ASSERT_EQ(out->size(), dt.size());
+
+  const auto [worst, moved] = real_errors(msg, dt, *out, w, v);
+  RecordProperty("max_error_mm", std::to_string(worst * 1e3));
   EXPECT_GT(moved, 0.05) << "fixture scan should carry real skew";
   EXPECT_LT(worst, kTolerance);
 }

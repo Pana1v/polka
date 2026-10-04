@@ -115,8 +115,10 @@ polka/
 ├── launch/polka.launch.py            # Launch file
 ├── doc/                              # docs and assets
 │   ├── CONFIGURATION.md
+│   ├── DESKEW.md                     # how much skew, and what deskew fixes
+│   ├── PERFORMANCE.md
 │   ├── PIPELINE.md
-│   ├── images/polka.png              # logo
+│   ├── images/                       # logo and figures
 │   └── media/                        # demo GIFs (gifs/) + generator toolchain
 ├── include/polka/
 │   ├── polka_node.hpp                # Main composable node (orchestration only)
@@ -124,7 +126,10 @@ polka/
 │   ├── config/config_loader.hpp      # Parameter loading and hot-reload
 │   ├── input/
 │   │   ├── source_adapter.hpp        # Subscribes and converts incoming sensor data
-│   │   └── imu_buffer.hpp            # IMU ring buffer with atomic snapshot
+│   │   ├── imu_buffer.hpp            # IMU ring buffer with atomic snapshot
+│   │   ├── gyro_bias.hpp             # Gyro bias learned at standstill
+│   │   ├── odom_buffer.hpp           # Odometry twist buffer for translation deskew
+│   │   └── point_time_decoder.hpp    # Per-point time field decoding
 │   ├── filters/
 │   │   ├── i_filter.hpp              # Filter interface
 │   │   ├── filter_chain.hpp          # Builds a filter chain from FilterParams
@@ -149,6 +154,8 @@ polka/
     ├── config_loader.cpp
     ├── source_adapter.cpp
     ├── imu_buffer.cpp
+    ├── gyro_bias.cpp
+    ├── odom_buffer.cpp
     ├── filters/                      # Filter implementations
     ├── merge_engine/                 # Merge engine implementations
     └── output/                       # OutputPipeline and ScanBuilder implementations

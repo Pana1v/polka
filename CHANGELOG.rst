@@ -4,6 +4,7 @@ Changelog for package polka
 
 Forthcoming
 -----------
+* Deskew cost no longer depends on point order. Exact rotations are built once per scan at evenly spaced angles, and each point steps from the nearest one. Vertically sweeping lidars stored column by column, and unordered clouds, now cost the same as spinning ones: on public 85k-point Airy clouds, shuffled order went from 9.9 to 4.4 ns per point (SE(3)) and 11.9 to 3.3 (rotation). Accuracy is unchanged.
 * Add ``motion_compensation.translation`` (``none`` | ``imu_accel`` | ``odometry``) and ``motion_compensation.odom_topic``. Deskew had no velocity term, so steady motion went uncorrected (1.5 m/s: 15 cm of skew per 0.1 s scan); ``odometry`` takes ``v * dt`` from a ``nav_msgs/Odometry`` twist, moved to each lidar's origin with its lever arm. ``none`` deskews rotation only. ``imu_accel`` stays the default. New dependency: ``nav_msgs``.
 * Behavior change: deskew and inter-source alignment average the IMU over the scan's own time span instead of using the newest sample. On a real AMR IMU stream, the newest-sample acceleration term was worse than none in 76% of 0.1 s windows while moving; one 8 m/s^2 shock after a scan shifted it 4 cm.
 * The SE(3) deskew path re-anchors often enough to stay under 0.1 mm at road speed, where translation reaches metres per scan. 4.3 to 4.4 ns per point.

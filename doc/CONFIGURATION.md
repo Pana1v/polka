@@ -83,7 +83,7 @@ outputs:
 
 ## Motion compensation (IMU deskewing)
 
-Corrects for the robot moving while a LiDAR scan is being collected. Per-point deskewing runs an SE(3) exponential-map motion model, applied to each point by that point's own timestamp: rotation from the IMU's angular velocity, translation from the source `translation` names. Both are averaged over the scan's own time span, so one shock sample after the scan does not skew it. Inter-source alignment handles timing offsets between sensors with the same motion. The motion model follows [rko_lio](https://github.com/PRBonn/rko_lio) (Malladi et al., 2025).
+Corrects for the robot moving while a LiDAR scan is being collected. Per-point deskewing runs an SE(3) exponential-map motion model, applied to each point by that point's own timestamp: rotation from the IMU's angular velocity, translation from the source `translation` names. Both are averaged over the scan's own time span, so one shock sample after the scan does not skew it. Inter-source alignment handles timing offsets between sensors with the same motion. The motion model follows [rko_lio](https://github.com/PRBonn/rko_lio) (Malladi et al., 2025). [Deskew](DESKEW.md) shows how much skew to expect and what correction removes.
 
 ```yaml
 motion_compensation:

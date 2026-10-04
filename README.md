@@ -32,7 +32,7 @@
 
 </p>
   
-**Multi-LiDAR fusion node for ROS 2.** Takes any mix of PointCloud2 and LaserScan sources and publishes one merged PointCloud2, one merged LaserScan, or both. Filters per source and on the output, deskews with IMU data, and uses CUDA if you build it in. One node instead of a relay, filter, transform, merge and downsample chain.
+**Multi-LiDAR fusion node for ROS 2.** Takes any mix of PointCloud2 and LaserScan sources and publishes one merged PointCloud2, one merged LaserScan, or both. Filters per source and on the output, deskews with IMU and odometry, and uses CUDA if you build it in. One node instead of a relay, filter, transform, merge and downsample chain.
 
 ## Features in action
 
@@ -61,16 +61,18 @@ Each clip is polka with a different config, run on the [TIERS multi-LiDAR datase
 </table>
 
 <p align="center">
-  <img src="doc/media/gifs/deskew.gif" alt="per-point deskew: raw scan vs deskewed" width="560"/>
+  <img src="doc/media/gifs/deskew_3d.gif" alt="three lidars on an articulated vehicle: sweep, deskew, filter, merge" width="560"/>
   <br/>
-  <em>Deskew: per-point SE(3) correction removes intra-scan motion smear. Synthetic yaw, generated separately from the TIERS clips above.</em>
+  <em>Simulated: three lidars on the articulated rig from <a href="https://github.com/Pana1v/polka/issues/2">#2</a>, geometry from its bag's TF. Each sweep is deskewed with IMU, odometry and steering-joint rate, filtered per source, merged and filtered again.</em>
 </p>
 
 ## Performance
 
 <p align="center">
-  <img src="doc/images/perf_summary.svg" alt="Polka 0.5.0 before and after performance summary" width="620"/>
+  <img src="doc/images/deskew_cost.png" alt="deskew time per point: polka, GLIM, rko_lio, LIO-SAM" width="620"/>
 </p>
+
+**Deskew.** 3.3 ns per point rotation-only, 4.4 with translation: 1.5 to 7x cheaper than the deskew step of GLIM, rko_lio and LIO-SAM on the same public clouds. Method and versions in [Performance](doc/PERFORMANCE.md#deskew-against-other-stacks).
 
 **CUDA.** The GPU merge engine does transform, filter, voxel and scan flatten in one pass over the points, which pays off on heavy pipelines. On a filterless merge the CPU stays competitive — there is not enough per-point work to hide the kernel dispatch and the host-to-device copy. Build with `-DWITH_CUDA=ON` and it falls back to CPU on its own. It is not faster everywhere.
 Any binary package installed with `apt` is CPU-only: the ROS build farm has no CUDA toolchain,
@@ -85,7 +87,7 @@ so the GPU engine is compiled out there. Build from source to get it.
 - **Heterogeneous fusion**: mix 3D PointCloud2 and 2D LaserScan sources freely
 - **Dual output**: merged PointCloud2, LaserScan, or both at once
 - **Per-source and output filtering**: range, angular, box, height cap, footprint (ego-body) exclusion, voxel downsample
-- **IMU deskewing**: per-point SE(3) motion correction, with per-point timestamp auto-detect
+- **Deskewing**: per-point SE(3) motion correction, cost independent of point order; translation from odometry, IMU, or none; gyro bias learned at standstill; per-point timestamp auto-detect
 - **CUDA acceleration**: optional GPU merge engine, falls back to CPU
 - **TF2 integration**: automatic lookup with last-known-good fallback
 - **Runtime reconfiguration**: filters, outputs, deskewing and the source list all change live via `ros2 param set`, no restart
@@ -101,7 +103,9 @@ so the GPU engine is compiled out there. Build from source to get it.
 | Single global IMU | yes | `motion_compensation.imu_topic` |
 | Multiple IMUs (per source) | yes | `sources.<name>.imu_topic` |
 | Decentralized IMUs (different mounts) | yes | TF rotates angular velocity and acceleration into each sensor frame |
+| External IMU per lidar | yes | any `sensor_msgs/Imu` frame with a TF to the lidar |
 | Articulated IMUs (moving joint or turret) | yes | dynamic TF from `joint_states`; `config/example_articulated_imu.yaml` |
+| Velocity from odometry | yes | `motion_compensation.translation: odometry`, lever arm and joint rate from TF |
 
 Every source can have its own IMU on its own mount. polka looks up the live TF from each IMU frame to its sensor frame and rotates that IMU's angular velocity and acceleration into the sensor frame before deskewing, so a fixed chassis LiDAR and a rotating turret LiDAR each deskew against the motion they actually see:
 
@@ -113,6 +117,32 @@ graph LR
   turret --> polka
   polka --> merged[one merged cloud]
 ```
+
+### Translation
+
+An IMU gives rotation and changes in speed, not speed itself, so steady motion leaves skew behind. `translation: odometry` takes velocity from any `nav_msgs/Odometry` (wheels, an EKF, GNSS), moved to each lidar's origin through TF. That source must be independent of the clouds being deskewed.
+
+<p align="center">
+  <img src="doc/images/polka_modes.png" alt="RMS error against truth: no deskew, translation none, translation odometry" width="560"/>
+  <br/>
+  <em>polka_node on a synthetic stream with exact truth.</em>
+</p>
+
+### Articulated vehicles
+
+<p align="center">
+  <img src="doc/images/rig_layout.png" alt="three lidars on a center-steered vehicle, top and side view" width="620"/>
+  <br/>
+  <em>The rig from <a href="https://github.com/Pana1v/polka/issues/2">#2</a> as read from its bag's TF. Positions measured, body outlines schematic.</em>
+</p>
+
+Odometry reports the rear body; the front lidars ride the steering joint. polka adds each lidar's rate relative to the odometry frame, sampled from TF over the scan, and places every cloud with its mount pose at its own stamp. On the real front-lidar scan in `test/data` that takes the lidar's speed from 0.61 to 0.46 m/s and removes 6 cm of error.
+
+<p align="center">
+  <img src="doc/images/rig_skew_map.png" alt="raw skew per 5 cm cell on the rear lidar during a turn" width="360"/>
+  <br/>
+  <em>Raw skew on the rig's rear lidar at its sharpest turn, top view.</em>
+</p>
 
 ## Install
 
@@ -146,7 +176,8 @@ Point `output_frame_id` at your base frame, list your sensors under `source_name
 
 - **[Configuration](doc/CONFIGURATION.md)**: every parameter, filters, IMU deskewing, bag playback
 - **[Pipeline and architecture](doc/PIPELINE.md)**: what polka replaces, the internal stages, the file layout
-- **[Performance](doc/PERFORMANCE.md)**: the 0.5.0 numbers, the CPU/CUDA crossover, bandwidth
+- **[Deskew](doc/DESKEW.md)**: how big skew gets, and what deskew fixes on public KITTI data
+- **[Performance](doc/PERFORMANCE.md)**: deskew cost against GLIM, rko_lio and LIO-SAM, the CPU/CUDA crossover, bandwidth
 - **[Maintaining distro branches](MAINTAINING.md)**: how the six branches stay in sync
 
 ## License and credits

@@ -21,7 +21,9 @@ polka:
 
     output_frame_id: "base_link"     # all points are transformed into this frame
     output_rate: 20.0                # Hz - merged output publish rate
-    source_timeout: 0.5              # seconds - drop source if no data within this window
+    source_timeout: 0.5              # seconds - a source older than this is stale
+    source_stale_reuse_window: 1.5   # seconds - keep merging a stale source's last cloud
+                                     # until this old (>= source_timeout), then drop it
     enable_gpu: true                 # use CUDA GPU pipeline when available (falls back to CPU)
     timestamp_strategy: "earliest"   # "earliest" | "latest" | "average" | "local"
     max_source_spread_warn: 0.05     # seconds - warn if source timestamps differ by more
@@ -42,18 +44,26 @@ polka:
     # --------------------------------------------------
     # Motion Compensation (IMU-based deskewing)
     # --------------------------------------------------
-    # Corrects for robot motion during LiDAR scans using IMU data.
-    # Per-point deskewing uses per-point timestamps from the LiDAR driver
-    # and the SE(3) exponential map motion model (angular velocity + acceleration).
-    # Inter-source alignment corrects for timing offsets between different sensors.
-    # Motion model inspired by rko_lio (Malladi et al., 2025, arXiv:2509.06593).
+    # Corrects for robot motion during LiDAR scans. Per-point deskewing uses
+    # per-point timestamps from the LiDAR driver and the SE(3) exponential map:
+    # rotation from the IMU gyro, translation from the source chosen below, both
+    # averaged over the scan. Inter-source alignment corrects for timing offsets
+    # between different sensors with the same motion.
+    # Motion model after rko_lio (Malladi et al., 2025, arXiv:2509.06593).
+    # max_imu_age and imu_frame are still accepted but have no effect.
 
     motion_compensation:
       enabled: false
       imu_topic: ""                  # sensor_msgs/Imu topic (empty = disabled)
-      imu_frame: ""                  # If empty use header.frame_id
-      max_imu_age: 0.2               # seconds - reject stale IMU data
-      imu_buffer_size: 200           # ring buffer capacity (~1s at 200Hz)
+      imu_buffer_size: 200           # IMU history kept (~1 s at 200 Hz); must span a scan
+      translation: "imu_accel"       # where the translation during a scan comes from:
+                                     #   "none"      - rotation only (slow ground robots)
+                                     #   "imu_accel" - 0.5 * a * dt^2 from the IMU; misses
+                                     #                 steady velocity
+                                     #   "odometry"  - v * dt from odom_topic's twist
+      odom_topic: ""                 # nav_msgs/Odometry, for translation "odometry".
+                                     # Twist is read in its child_frame_id (TF to each
+                                     # lidar needed). Must not come from these clouds.
       per_point_deskew: true         # per-point correction within each scan
                                      # requires per-point timestamps in PointCloud2
                                      # (auto-detects 'time', 't', 'timestamp', etc.)
@@ -159,7 +169,7 @@ polka:
         # and define its bounds below.
         self_filter:
           enabled: false
-          box_names: ["chassis", "sensor_mast"]
+          box_names: ["chassis", "sensor_mast"]  # example; default is none
           chassis:                   # main robot body
             x_min: -0.30
             x_max:  0.30
@@ -176,10 +186,11 @@ polka:
             z_max:  1.20
 
         # Voxel downsampling - reduce point density uniformly
-        # Set leaf_size for uniform voxels, or leaf_x/y/z for per-axis control
+        # Set leaf_size for uniform voxels, or leaf_x/y/z for per-axis control.
+        # Any positive leaf size turns voxelization on, even with enabled: false.
         voxel:
           enabled: false
-          leaf_size: 0.05            # meters - uniform voxel size
+          leaf_size: 0.0             # meters - uniform voxel size (e.g. 0.05)
           # leaf_x: 0.05             # per-axis overrides (take priority over leaf_size)
           # leaf_y: 0.05
           # leaf_z: 0.10
@@ -187,7 +198,7 @@ polka:
       # === Merged LaserScan ===
       # Flattens the merged 3D cloud into a 2D scan (closest point per angular bin)
       scan:
-        enabled: true
+        enabled: false
         topic: "~/merged_scan"
 
         # QoS profile for the published LaserScan
@@ -200,19 +211,22 @@ polka:
           deadline_ms: 0.0
           lifespan_ms: 0.0
 
-        z_min: -0.10                 # meters - bottom of horizontal slice
-        z_max:  0.50                 # meters - top of horizontal slice
+        z_min: -0.15                 # meters - bottom of horizontal slice
+        z_max:  0.15                 # meters - top of horizontal slice
         angle_min: -3.14159265       # radians - scan start angle (full 360)
         angle_max:  3.14159265       # radians - scan end angle
         angle_increment: 0.00436332  # radians per bin (0.25 degrees = 1440 bins)
         range_min: 0.10              # meters - minimum valid range
-        range_max: 30.0              # meters - maximum valid range
+        range_max: 100.0             # meters - maximum valid range
 
     # --------------------------------------------------
     # Sources
     # --------------------------------------------------
     # Each source is an independent LiDAR input.
     #   type: "pointcloud2" (3D LiDAR) or "laserscan" (2D LiDAR)
+    #
+    # The two sources below are an example setup, not defaults: per-source
+    # filters default to off (range 0.1-100 m when enabled).
     #
     # Per-source filters run BEFORE merging, in each sensor's own frame.
     # This lets you crop irrelevant data early (less work for the merge step).

@@ -4,6 +4,7 @@ Changelog for package polka
 
 Forthcoming
 -----------
+* Interpolate the SE(3) deskew path between exact anchors, as the rotation-only path already does: 6.9 to 4.3 ns per point on a 66k-point scan. Accuracy stays under 1 mm, including ring-major clouds whose point times jump back at every ring.
 * Fix per-point deskew direction. Points were moved by the inverse of the sensor motion, which doubled intra-scan skew instead of removing it (0.6 rad/s yaw: 25 cm RMS raw, 50 cm after deskew, under 0.01 cm now).
 * Make the rotation-only deskew path reachable. It required IMU acceleration of exactly zero, which no real IMU produces since the EMA gravity estimate, so every scan took the slow SE(3) path. It now runs whenever the scan-wide translation from ``0.5 * a * dt^2`` is under 1 mm, and re-anchors across time jumps such as ring boundaries.
 * Closed-form SE(3) deskew path. Per-point math now runs in float. Per point on a 66k-point scan: 41.5 to 3.3 ns on the rotation path, 41.5 to 6.9 ns on SE(3).

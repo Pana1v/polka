@@ -157,6 +157,18 @@ if(BUILD_TESTING)
     ament_add_gtest(${test_name} test/${test_name}.cpp)
     target_link_libraries(${test_name} polka_core)
   endforeach()
+
+  # test_deskew replays a real bag fragment (test/data/airy_turn.mcap).
+  find_package(rosbag2_cpp REQUIRED)
+  find_package(tf2_msgs REQUIRED)
+  target_compile_definitions(test_deskew PRIVATE
+    POLKA_TEST_DATA="${CMAKE_CURRENT_SOURCE_DIR}/test/data")
+  if(COMMAND ament_target_dependencies)
+    ament_target_dependencies(test_deskew rosbag2_cpp tf2_msgs nav_msgs)
+  else()
+    target_link_libraries(test_deskew
+      rosbag2_cpp::rosbag2_cpp ${tf2_msgs_TARGETS} ${nav_msgs_TARGETS})
+  endif()
 endif()
 
 ament_package()

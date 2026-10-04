@@ -28,17 +28,23 @@
 #include <chrono>
 #include <cmath>
 #include <cstring>
+#include <map>
 #include <memory>
 #include <numeric>
 #include <random>
+#include <string>
 #include <thread>
 #include <vector>
 
+#include <nav_msgs/msg/odometry.hpp>
 #include <rclcpp/rclcpp.hpp>
+#include <rclcpp/serialization.hpp>
+#include <rosbag2_cpp/reader.hpp>
 #include <sensor_msgs/msg/imu.hpp>
 #include <sensor_msgs/msg/point_cloud2.hpp>
 #include <sensor_msgs/point_cloud2_iterator.hpp>
 #include <tf2_eigen/tf2_eigen.hpp>
+#include <tf2_msgs/msg/tf_message.hpp>
 
 #include "polka/input/source_adapter.hpp"
 #include "polka/util/se3_exp.hpp"
@@ -195,6 +201,61 @@ BodyTwist make_twist(const Eigen::Vector3d & v, const Eigen::Vector3d & w, const
   return t;
 }
 
+// 0.3 s of a real articulated vehicle at its sharpest turn: three RoboSense Airy
+// lidars with built-in IMUs, wheel odometry and TF. See test/data/README.md.
+constexpr char kRealBag[] = POLKA_TEST_DATA "/airy_turn.mcap";
+constexpr char kRealLidar[] = "/pointcloud/airy_rear";
+constexpr char kRealImu[] = "/imu/airy_rear";
+constexpr char kRealOdom[] = "/articulated_steering_controller/odom";
+
+struct RealData
+{
+  std::vector<sensor_msgs::msg::PointCloud2> clouds;
+  std::vector<sensor_msgs::msg::Imu> imu;
+  std::vector<nav_msgs::msg::Odometry> odom;
+  std::vector<geometry_msgs::msg::TransformStamped> tf_static;
+};
+
+template<typename T>
+T decode(const rosbag2_storage::SerializedBagMessage & bag_msg)
+{
+  T msg;
+  rclcpp::SerializedMessage raw(*bag_msg.serialized_data);
+  rclcpp::Serialization<T>().deserialize_message(&raw, &msg);
+  return msg;
+}
+
+RealData read_real_bag()
+{
+  rosbag2_storage::StorageOptions options;
+  options.uri = kRealBag;
+  options.storage_id = "mcap";
+  rosbag2_cpp::Reader reader;
+  reader.open(options);
+
+  RealData d;
+  while (reader.has_next()) {
+    const auto m = reader.read_next();
+    if (m->topic_name == kRealLidar) {
+      d.clouds.push_back(decode<sensor_msgs::msg::PointCloud2>(*m));
+    } else if (m->topic_name == kRealImu) {
+      d.imu.push_back(decode<sensor_msgs::msg::Imu>(*m));
+    } else if (m->topic_name == kRealOdom) {
+      d.odom.push_back(decode<nav_msgs::msg::Odometry>(*m));
+    } else if (m->topic_name == "/tf_static") {
+      for (const auto & t : decode<tf2_msgs::msg::TFMessage>(*m).transforms) {
+        d.tf_static.push_back(t);
+      }
+    }
+  }
+  return d;
+}
+
+double stamp_sec(const builtin_interfaces::msg::Time & t)
+{
+  return rclcpp::Time(t).seconds();
+}
+
 }  // namespace
 
 class DeskewTest : public ::testing::Test
@@ -217,10 +278,21 @@ protected:
     const BodyTwist & body_twist = BodyTwist(),
     std::shared_ptr<tf2_ros::Buffer> tf = nullptr)
   {
-    auto imu = std::make_shared<AveragedImu>();
-    imu->angular_vel = angular_vel;
-    imu->linear_accel = accel;
-    imu->valid = true;
+    AveragedImu imu;
+    imu.angular_vel = angular_vel;
+    imu.linear_accel = accel;
+    imu.valid = true;
+    return deskew_msg(to_msg(scan), imu, translation, body_twist, tf);
+  }
+
+  // Feeds one PointCloud2 through a fresh SourceAdapter holding a fixed IMU reading
+  // and body twist, returns the deskewed cloud (null on timeout).
+  CloudT::ConstPtr deskew_msg(
+    const sensor_msgs::msg::PointCloud2 & msg, const AveragedImu & imu_reading,
+    TranslationMode translation, const BodyTwist & body_twist,
+    std::shared_ptr<tf2_ros::Buffer> tf)
+  {
+    auto imu = std::make_shared<AveragedImu>(imu_reading);
 
     SourceConfig cfg;
     cfg.name = "test";
@@ -238,7 +310,6 @@ protected:
       [twist](const rclcpp::Time &, const rclcpp::Time &) {return twist;});
 
     auto pub = node_->create_publisher<sensor_msgs::msg::PointCloud2>(kTopic, 5);
-    const auto msg = to_msg(scan);
     const auto deadline = std::chrono::steady_clock::now() + 3s;
     while (!adapter.received() && std::chrono::steady_clock::now() < deadline) {
       pub->publish(msg);
@@ -520,6 +591,111 @@ TEST_F(DeskewTest, OdometryLeverArmLandsOnTruth)
   ASSERT_TRUE(out) << "adapter received nothing";
   ASSERT_EQ(out->size(), kPoints);
   EXPECT_LT(max_error(*out, scan), kTolerance);
+}
+
+TEST_F(DeskewTest, FlippedImuFrameFirstScanLandsOnTruth)
+{
+  // IMU mounted upside down relative to the lidar (NED-style, 180 deg about x), as
+  // on lidars with built-in IMUs. Even a source's very first scan must rotate the
+  // gyro into the lidar frame before deskewing.
+  const Eigen::Vector3d w_lidar(0.0, 0.0, 0.6);
+  const Eigen::Isometry3d T_lidar_imu(Eigen::AngleAxisd(M_PI, Eigen::Vector3d::UnitX()));
+  auto tf = std::make_shared<tf2_ros::Buffer>(node_->get_clock());
+  geometry_msgs::msg::TransformStamped tf_msg = tf2::eigenToTransform(T_lidar_imu);
+  tf_msg.header.frame_id = "lidar";
+  tf_msg.child_frame_id = "imu_ned";
+  tf->setTransform(tf_msg, "test", true);
+
+  const auto scan = make_scan(0.0, [&](double dt) {return yaw_motion(w_lidar.z(), dt);});
+  AveragedImu imu;
+  imu.angular_vel = T_lidar_imu.linear().transpose() * w_lidar;
+  imu.frame_id = "imu_ned";
+  imu.valid = true;
+
+  const auto out = deskew_msg(to_msg(scan), imu, TranslationMode::NONE, BodyTwist(), tf);
+  ASSERT_TRUE(out) << "adapter received nothing";
+  ASSERT_EQ(out->size(), kPoints);
+  EXPECT_LT(max_error(*out, scan), kTolerance);
+}
+
+TEST_F(DeskewTest, RealTurningScanMatchesExactDeskew)
+{
+  // A real rear-lidar scan at 0.66 rad/s: organized 96 x 900 Airy layout with
+  // no-return NaNs and absolute FLOAT64 point times. polka's anchored float deskew
+  // must match an exact double-precision SE(3) built from the same IMU, odometry
+  // and TF.
+  const RealData d = read_real_bag();
+  ASSERT_FALSE(d.clouds.empty());
+  ASSERT_FALSE(d.tf_static.empty());
+  const auto & msg = d.clouds[d.clouds.size() / 2];
+  const double header = stamp_sec(msg.header.stamp);
+
+  // Exact per-point times, for the scan window and the reference.
+  std::vector<double> dt;
+  for (sensor_msgs::PointCloud2ConstIterator<double> it(msg, "timestamp"); it != it.end(); ++it) {
+    dt.push_back(*it - header);
+  }
+  const auto [dt_min, dt_max] = std::minmax_element(dt.begin(), dt.end());
+
+  // Motion over the scan: IMU mean (in the IMU frame), odometry mean (base frame).
+  AveragedImu imu;
+  int imu_n = 0;
+  for (const auto & m : d.imu) {
+    const double t = stamp_sec(m.header.stamp) - header;
+    if (t < *dt_min || t > *dt_max) {continue;}
+    imu.angular_vel += Eigen::Vector3d(
+      m.angular_velocity.x, m.angular_velocity.y, m.angular_velocity.z);
+    imu.frame_id = m.header.frame_id;
+    ++imu_n;
+  }
+  ASSERT_GE(imu_n, 2);
+  imu.angular_vel /= imu_n;
+  imu.valid = true;
+
+  BodyTwist twist;
+  int odom_n = 0;
+  for (const auto & m : d.odom) {
+    const double t = stamp_sec(m.header.stamp) - header;
+    if (t < *dt_min || t > *dt_max) {continue;}
+    const auto & tw = m.twist.twist;
+    twist.linear += Eigen::Vector3d(tw.linear.x, tw.linear.y, tw.linear.z);
+    twist.angular += Eigen::Vector3d(tw.angular.x, tw.angular.y, tw.angular.z);
+    twist.frame_id = m.child_frame_id;
+    ++odom_n;
+  }
+  ASSERT_GE(odom_n, 1);
+  twist.linear /= odom_n;
+  twist.angular /= odom_n;
+
+  auto tf = std::make_shared<tf2_ros::Buffer>(node_->get_clock());
+  for (const auto & t : d.tf_static) {
+    tf->setTransform(t, "bag", true);
+  }
+
+  // Reference: exact SE(3) per point in double, motion in the lidar frame.
+  const Eigen::Matrix3d R_lidar_imu = tf2::transformToEigen(
+    tf->lookupTransform(msg.header.frame_id, imu.frame_id, tf2::TimePointZero)).rotation();
+  const Eigen::Isometry3d T_base_lidar = tf2::transformToEigen(
+    tf->lookupTransform(twist.frame_id, msg.header.frame_id, tf2::TimePointZero));
+  const Eigen::Vector3d w = R_lidar_imu * imu.angular_vel;
+  const Eigen::Vector3d v = velocity_at_frame(twist.linear, twist.angular, T_base_lidar);
+
+  const auto out = deskew_msg(msg, imu, TranslationMode::ODOMETRY, twist, tf);
+  ASSERT_TRUE(out) << "adapter received nothing";
+  ASSERT_EQ(out->size(), dt.size());
+
+  double worst = 0.0, moved = 0.0;
+  size_t i = 0;
+  for (sensor_msgs::PointCloud2ConstIterator<float> it(msg, "x"); it != it.end(); ++it, ++i) {
+    const Eigen::Vector3d p(it[0], it[1], it[2]);
+    if (!p.allFinite()) {continue;}
+    const Eigen::Vector3d truth = compute_motion_delta(w, v, Eigen::Vector3d::Zero(), dt[i]) * p;
+    const Eigen::Vector3d got((*out)[i].x, (*out)[i].y, (*out)[i].z);
+    worst = std::max(worst, (got - truth).norm());
+    moved = std::max(moved, (truth - p).norm());
+  }
+  EXPECT_GT(moved, 0.05) << "fixture scan should carry real skew";
+  EXPECT_LT(worst, kTolerance);
 }
 
 TEST_F(DeskewTest, ImuShockAfterScanIsNotApplied)

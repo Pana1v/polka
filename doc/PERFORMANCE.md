@@ -5,10 +5,10 @@ Measured speedups, all on the CPU path, all from the CHANGELOG.
 | Change | Before | After | Factor |
 |---|---|---|---|
 | Deskew, rotation-only path (real IMU), per point | 41.5 ns | 3.3 ns | ~12x cheaper |
-| Deskew, SE(3) path, per point | 41.5 ns | 6.9 ns | ~6x cheaper |
+| Deskew, SE(3) path, per point | 41.5 ns | 4.3 ns | ~10x cheaper |
 | CPU angular filter, per tick at 259k points | 10.47 ms | 3.55 ms | ~3x cheaper |
 
-Deskew numbers: six 66k-point RoboSense scans, one pinned core. The rotation-only path computes an exact rotation every 16 points and interpolates in between, re-anchoring across larger time jumps. 0.5.0 listed a 6.2x deskew gain from that stride, but the path only ran for IMU acceleration of exactly zero, which real IMUs never report, so it did not apply in practice until this release. The angular filter dropped its per-point `atan2` for a precomputed cross-product half-plane test.
+Deskew numbers: six 66k-point RoboSense scans, one pinned core. Both paths compute the exact transform every 16 points and interpolate in between, re-anchoring across larger time jumps. 0.5.0 listed a 6.2x deskew gain from that stride, but the path only ran for IMU acceleration of exactly zero, which real IMUs never report, so it did not apply in practice until this release. The angular filter dropped its per-point `atan2` for a precomputed cross-product half-plane test.
 
 Voxel downsampling is not in that table. It trades resolution for data volume rather than doing the same work faster — see bandwidth below.
 

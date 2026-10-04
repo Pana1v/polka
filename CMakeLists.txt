@@ -61,6 +61,7 @@ set(POLKA_CORE_SOURCES
   src/diag/drift_tracker.cpp
   src/diag/diagnostics_reporter.cpp
   src/imu_buffer.cpp
+  src/gyro_bias.cpp
   src/odom_buffer.cpp
   src/filters/range_filter.cpp
   src/filters/angular_filter.cpp
@@ -148,6 +149,7 @@ if(BUILD_TESTING)
   find_package(ament_cmake_gtest REQUIRED)
   foreach(test_name
       test_drift_tracker
+      test_gyro_bias
       test_stat_counters
       test_config_preview
       test_ouster_timestamps

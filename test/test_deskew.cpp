@@ -28,6 +28,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstring>
+#include <functional>
 #include <map>
 #include <memory>
 #include <numeric>
@@ -320,11 +321,12 @@ protected:
   }
 
   // Same as deskew(), but through a real per-source ImuBuffer fed with an IMU
-  // stream: constant 'angular_vel' and 'accel' over [t_from, t_to] (relative to
-  // header), with the newest sample replaced by 'last_accel'.
+  // stream: gyro 'gyro(t)' and constant 'accel' over [t_from, t_to] (relative to
+  // header), with the newest sample's accel replaced by 'last_accel'.
   CloudT::ConstPtr deskew_streamed(
-    const Scan & scan, const Eigen::Vector3d & angular_vel, const Eigen::Vector3d & accel,
-    double t_from, double t_to, const Eigen::Vector3d & last_accel)
+    const Scan & scan, const std::function<Eigen::Vector3d(double)> & gyro,
+    const Eigen::Vector3d & accel, double t_from, double t_to,
+    const Eigen::Vector3d & last_accel)
   {
     SourceConfig cfg;
     cfg.name = "test";
@@ -340,8 +342,10 @@ protected:
       kImuTopic, rclcpp::SensorDataQoS().keep_last(1000));
     const int samples = static_cast<int>((t_to - t_from) * kImuRate) + 1;
     for (int k = 0; k < samples; ++k) {
+      const double t = t_from + k / kImuRate;
+      const Eigen::Vector3d angular_vel = gyro(t);
       sensor_msgs::msg::Imu imu;
-      imu.header.stamp = kHeaderStamp + rclcpp::Duration::from_seconds(t_from + k / kImuRate);
+      imu.header.stamp = kHeaderStamp + rclcpp::Duration::from_seconds(t);
       imu.orientation.w = 1.0;
       imu.orientation_covariance[0] = 0.0;
       const Eigen::Vector3d a = (k == samples - 1 ? last_accel : accel) +
@@ -708,7 +712,44 @@ TEST_F(DeskewTest, ImuShockAfterScanIsNotApplied)
   const Eigen::Vector3d shock = a + Eigen::Vector3d(8.0, 0.0, 0.0);
   const auto scan = make_scan(0.0, [&](double dt) {return compute_motion_delta(w, a, dt);});
 
-  const auto out = deskew_streamed(scan, w, a, -0.05, kScanPeriod + 0.02, shock);
+  const auto out = deskew_streamed(
+    scan, [&](double) {return w;}, a, -0.05, kScanPeriod + 0.02, shock);
+  ASSERT_TRUE(out) << "adapter received nothing";
+  ASSERT_EQ(out->size(), kPoints);
+  EXPECT_LT(max_error(*out, scan), kTolerance);
+}
+
+TEST_F(DeskewTest, GyroBiasLearnedAtStandstill)
+{
+  // The front Airy on the polka#2 rig reads 24.6 mrad/s while parked. Deskewing a
+  // turn with it skews points by bias * dt * range: 5 cm at 20 m. polka must learn
+  // the bias while the vehicle stands still and subtract it.
+  const Eigen::Vector3d bias(0.0136, 0.0151, 0.0143);
+  const Eigen::Vector3d w(0.0, 0.0, 0.6);
+  constexpr double kStillFrom = -1.6;   // s before the header: parked
+  constexpr double kTurnFrom = -0.1;    // s: starts turning
+  const auto scan = make_scan(0.0, [&](double dt) {return yaw_motion(w.z(), dt);});
+
+  const auto out = deskew_streamed(
+    scan, [&](double t) {return t < kTurnFrom ? bias : Eigen::Vector3d(w + bias);},
+    Eigen::Vector3d::Zero(), kStillFrom, kScanPeriod + 0.02, Eigen::Vector3d::Zero());
+  ASSERT_TRUE(out) << "adapter received nothing";
+  ASSERT_EQ(out->size(), kPoints);
+  const double error = max_error(*out, scan);
+  RecordProperty("max_error_mm", std::to_string(error * 1e3));
+  EXPECT_LT(error, kTolerance);
+}
+
+TEST_F(DeskewTest, SlowSteadyTurnIsNotLearnedAsBias)
+{
+  // A smooth turn looks still to a gyro (no spread). Above the largest plausible
+  // bias it must be kept as motion.
+  const Eigen::Vector3d w(0.0, 0.0, 0.05);
+  const auto scan = make_scan(0.0, [&](double dt) {return yaw_motion(w.z(), dt);});
+
+  const auto out = deskew_streamed(
+    scan, [&](double) {return w;}, Eigen::Vector3d::Zero(), -1.6, kScanPeriod + 0.02,
+    Eigen::Vector3d::Zero());
   ASSERT_TRUE(out) << "adapter received nothing";
   ASSERT_EQ(out->size(), kPoints);
   EXPECT_LT(max_error(*out, scan), kTolerance);

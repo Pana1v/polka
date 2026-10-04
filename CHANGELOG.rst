@@ -4,6 +4,8 @@ Changelog for package polka
 
 Forthcoming
 -----------
+* Fix the first deskewed scan of each source using the gyro in the IMU's own frame instead of the lidar's. It reversed the turn for upside-down (NED) IMUs, as built into many lidars: 13 cm off on a real scan.
+* Add a real-data deskew test on 0.3 s of the articulated-rig bag from #2 (``test/data/airy_turn.mcap``, 8.4 MB). New test dependencies: ``rosbag2_cpp``, ``rosbag2_storage_mcap``, ``tf2_msgs``.
 * Deskew cost no longer depends on point order. Exact rotations are built once per scan at evenly spaced angles, and each point steps from the nearest one. Vertically sweeping lidars stored column by column, and unordered clouds, now cost the same as spinning ones: on public 85k-point Airy clouds, shuffled order went from 9.9 to 4.4 ns per point (SE(3)) and 11.9 to 3.3 (rotation). Accuracy is unchanged.
 * Add ``motion_compensation.translation`` (``none`` | ``imu_accel`` | ``odometry``) and ``motion_compensation.odom_topic``. Deskew had no velocity term, so steady motion went uncorrected (1.5 m/s: 15 cm of skew per 0.1 s scan); ``odometry`` takes ``v * dt`` from a ``nav_msgs/Odometry`` twist, moved to each lidar's origin with its lever arm. ``none`` deskews rotation only. ``imu_accel`` stays the default. New dependency: ``nav_msgs``.
 * Behavior change: deskew and inter-source alignment average the IMU over the scan's own time span instead of using the newest sample. On a real AMR IMU stream, the newest-sample acceleration term was worse than none in 76% of 0.1 s windows while moving; one 8 m/s^2 shock after a scan shifted it 4 cm.

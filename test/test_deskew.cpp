@@ -160,7 +160,7 @@ protected:
     cfg.qos_history_depth = 5;
 
     SourceAdapter adapter(
-      node_.get(), cfg, false, [imu]() {return imu;}, true, "auto");
+      node_.get(), cfg, false, [imu](const rclcpp::Time &, const rclcpp::Time &) {return imu;}, true, "auto");
 
     auto pub = node_->create_publisher<sensor_msgs::msg::PointCloud2>(kTopic, 5);
     const auto msg = to_msg(scan);

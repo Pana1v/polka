@@ -32,6 +32,7 @@
 #include "polka/diag/stat_counters.hpp"
 #include "polka/input/source_adapter.hpp"
 #include "polka/input/imu_buffer.hpp"
+#include "polka/input/odom_buffer.hpp"
 #include "polka/merge_engine/i_merge_engine.hpp"
 #include "polka/output/output_pipeline.hpp"
 #include "polka/output/scan_builder.hpp"
@@ -92,6 +93,9 @@ private:
   std::unique_ptr<SourceAdapter> make_adapter(
     const SourceConfig & sc, const MergeConfig & cfg);
   SourceAdapter::ImuGetter make_imu_getter(const MergeConfig & cfg);
+  SourceAdapter::TwistGetter make_twist_getter(const MergeConfig & cfg);
+  // Velocity of the output frame's origin, in it, from odometry over [from, to].
+  Eigen::Vector3d output_velocity(const rclcpp::Time & from, const rclcpp::Time & to);
   DriftTracker::Config drift_config(
     const SourceConfig & sc, const DiagnosticsConfig & d) const;
 
@@ -105,6 +109,7 @@ private:
   // Input
   std::vector<SourceSlot> sources_;
   std::shared_ptr<ImuBuffer> global_imu_;
+  std::shared_ptr<OdomBuffer> odom_;
 
   // Transform
   std::shared_ptr<tf2_ros::Buffer> tf_buffer_;

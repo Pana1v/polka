@@ -22,6 +22,7 @@ find_package(tf2_eigen REQUIRED)
 find_package(pcl_conversions REQUIRED)
 find_package(laser_geometry REQUIRED)
 find_package(diagnostic_msgs REQUIRED)
+find_package(nav_msgs REQUIRED)
 find_package(PCL REQUIRED COMPONENTS common filters)
 find_package(Eigen3 REQUIRED)
 
@@ -60,6 +61,7 @@ set(POLKA_CORE_SOURCES
   src/diag/drift_tracker.cpp
   src/diag/diagnostics_reporter.cpp
   src/imu_buffer.cpp
+  src/odom_buffer.cpp
   src/filters/range_filter.cpp
   src/filters/angular_filter.cpp
   src/filters/box_filter.cpp
@@ -83,7 +85,7 @@ if(COMMAND ament_target_dependencies)
   ament_target_dependencies(polka_core
     rclcpp rclcpp_components sensor_msgs
     tf2_ros tf2_geometry_msgs tf2_eigen pcl_conversions laser_geometry
-    diagnostic_msgs
+    diagnostic_msgs nav_msgs
   )
   if(point_cloud_transport_FOUND)
     ament_target_dependencies(polka_core point_cloud_transport)
@@ -99,6 +101,7 @@ else()
     ${pcl_conversions_TARGETS}
     laser_geometry::laser_geometry
     ${diagnostic_msgs_TARGETS}
+    ${nav_msgs_TARGETS}
   )
   if(point_cloud_transport_FOUND)
     target_link_libraries(polka_core point_cloud_transport::point_cloud_transport)

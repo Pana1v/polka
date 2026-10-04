@@ -58,6 +58,12 @@ enum class TimestampStrategy { EARLIEST, LATEST, AVERAGE, LOCAL };
 //   ABSOLUTE - raw Unix seconds, as received from the source LiDAR
 enum class PerPointTimeMode { OFFSET, ABSOLUTE };
 
+// Where deskew gets the sensor's translation during a scan.
+//   NONE      - rotation only; for slow ground robots
+//   IMU_ACCEL - 0.5 * a * dt^2 from IMU acceleration; misses steady velocity
+//   ODOMETRY  - v * dt from a nav_msgs/Odometry twist (wheel odometry, EKF)
+enum class TranslationMode { NONE, IMU_ACCEL, ODOMETRY };
+
 struct PerPointTimeConfig
 {
   bool enabled = false;                          // emit a per-point 'time' field
@@ -236,6 +242,8 @@ struct MotionCompensationConfig
   bool per_point_deskew = true;                   // per-point correction if timestamps available
   std::string deskew_timestamp_field = "auto";    // "auto" or specific field name
   std::string imu_frame = "";                     // empty = auto-detect from IMU msg header
+  TranslationMode translation = TranslationMode::IMU_ACCEL;
+  std::string odom_topic = "";                    // nav_msgs/Odometry, for ODOMETRY
 };
 
 struct DiagnosticsConfig

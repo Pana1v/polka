@@ -118,6 +118,38 @@ TEST_F(ConfigPreviewTest, InvalidTimestampStrategyRejected)
   }
 }
 
+TEST_F(ConfigPreviewTest, InvalidTranslationModeRejected)
+{
+  std::vector<rclcpp::Parameter> proposed = {
+    rclcpp::Parameter("motion_compensation.translation", "velocity"),
+  };
+  try {
+    loader_->preview(proposed, {"a", "b"});
+    FAIL() << "expected invalid motion_compensation.translation to throw";
+  } catch (const std::exception & ex) {
+    EXPECT_NE(std::string(ex.what()).find("translation"), std::string::npos);
+  }
+}
+
+TEST_F(ConfigPreviewTest, OdometryTranslationNeedsOdomTopic)
+{
+  std::vector<rclcpp::Parameter> proposed = {
+    rclcpp::Parameter("motion_compensation.enabled", true),
+    rclcpp::Parameter("motion_compensation.translation", "odometry"),
+  };
+  try {
+    loader_->preview(proposed, {"a", "b"});
+    FAIL() << "expected odometry translation without odom_topic to throw";
+  } catch (const std::exception & ex) {
+    EXPECT_NE(std::string(ex.what()).find("odom_topic"), std::string::npos);
+  }
+
+  proposed.emplace_back("motion_compensation.odom_topic", "/odom");
+  EXPECT_EQ(
+    loader_->preview(proposed, {"a", "b"}).motion_compensation.translation,
+    TranslationMode::ODOMETRY);
+}
+
 TEST_F(ConfigPreviewTest, InvalidDiagnosticsConfigRejected)
 {
   std::vector<rclcpp::Parameter> proposed = {

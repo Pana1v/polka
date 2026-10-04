@@ -12,6 +12,10 @@ on the `panav/viz/demo-generator` branch (about t2.6 to t10.6 of the 39s clip), 
 ffmpeg using a `trim` filter and a two-pass palette. The scripts here didn't make it. It
 shows a synthetic 1 rad/s yaw, so it demonstrates the mechanism rather than the dataset.
 
+`gifs/deskew_3d.gif` is also made elsewhere: a numpy ray-cast simulation of the three-lidar
+articulated rig from [#2](https://github.com/Pana1v/polka/issues/2), with geometry from that
+bag's TF and deskew math mirroring `source_adapter.cpp`. The scripts here didn't make it either.
+
 ## Pipeline
 
 ```

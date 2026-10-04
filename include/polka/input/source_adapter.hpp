@@ -95,6 +95,12 @@ private:
   // Zero (rotation-only deskew) when the twist or its TF is unavailable.
   Eigen::Vector3d sensor_velocity(
     const std::string & sensor_frame, const rclcpp::Time & from, const rclcpp::Time & to);
+  // Rate of child's origin in parent (m/s, parent frame) over a scan-long window,
+  // from the TF chain; T_mid is set to the pose at the window's middle. Zero, with
+  // T_mid untouched, for a static chain or when TF history is missing.
+  Eigen::Vector3d lever_arm_rate(
+    const std::string & parent, const std::string & child,
+    const rclcpp::Time & from, const rclcpp::Time & to, Eigen::Isometry3d & T_mid);
 
   rclcpp::Node * node_;
   SourceConfig config_;

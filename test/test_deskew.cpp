@@ -493,8 +493,8 @@ protected:
     // Scan centred on the header, since the joint's sweep is not a constant twist.
     const auto scan = make_scan(
       -kHalfScan, [&](double dt) {
-        return base_to_lidar(0.0).inverse() * twist_motion(w_base, v_base, dt) *
-        base_to_lidar(dt);
+        const Eigen::Isometry3d base_motion = twist_motion(w_base, v_base, dt);
+        return base_to_lidar(0.0).inverse() * base_motion * base_to_lidar(dt);
       });
 
     const Eigen::Vector3d w_lidar(0.0, 0.0, w_base.z() + kJointRate);

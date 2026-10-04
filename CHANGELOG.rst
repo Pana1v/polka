@@ -4,6 +4,11 @@ Changelog for package polka
 
 Forthcoming
 -----------
+* Add ``motion_compensation.translation`` (``none`` | ``imu_accel`` | ``odometry``) and ``motion_compensation.odom_topic``. Deskew had no velocity term, so steady motion went uncorrected (1.5 m/s: 15 cm of skew per 0.1 s scan); ``odometry`` takes ``v * dt`` from a ``nav_msgs/Odometry`` twist, moved to each lidar's origin with its lever arm. ``none`` deskews rotation only. ``imu_accel`` stays the default. New dependency: ``nav_msgs``.
+* Behavior change: deskew and inter-source alignment average the IMU over the scan's own time span instead of using the newest sample. On a real AMR IMU stream, the newest-sample acceleration term was worse than none in 76% of 0.1 s windows while moving; one 8 m/s^2 shock after a scan shifted it 4 cm.
+* The SE(3) deskew path re-anchors often enough to stay under 0.1 mm at road speed, where translation reaches metres per scan. 4.3 to 4.4 ns per point.
+* ``motion_compensation.max_imu_age`` and ``imu_frame`` never had an effect. They still load, with a startup warning, and are gone from the example configs.
+* Example configs list only non-default values and load to the same parameters as before. ``detailed_params.yaml`` now shows the real defaults for ``outputs.scan`` (``enabled``, ``z_min``, ``z_max``, ``range_max``) and ``outputs.cloud.voxel.leaf_size``; its old ``leaf_size: 0.05`` silently turned voxelization on.
 * Interpolate the SE(3) deskew path between exact anchors, as the rotation-only path already does: 6.9 to 4.3 ns per point on a 66k-point scan. Accuracy stays under 1 mm, including ring-major clouds whose point times jump back at every ring.
 * Fix per-point deskew direction. Points were moved by the inverse of the sensor motion, which doubled intra-scan skew instead of removing it (0.6 rad/s yaw: 25 cm RMS raw, 50 cm after deskew, under 0.01 cm now).
 * Make the rotation-only deskew path reachable. It required IMU acceleration of exactly zero, which no real IMU produces since the EMA gravity estimate, so every scan took the slow SE(3) path. It now runs whenever the scan-wide translation from ``0.5 * a * dt^2`` is under 1 mm, and re-anchors across time jumps such as ring boundaries.

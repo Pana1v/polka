@@ -412,7 +412,20 @@ MergeConfig ConfigLoader::read_config(
 MergeConfig ConfigLoader::load()
 {
   auto source_names = node_->get_parameter("source_names").as_string_array();
-  return read_config(source_names, /*allow_pending=*/ false);
+  MergeConfig cfg = read_config(source_names, /*allow_pending=*/ false);
+
+  // Still accepted so old configs load, but nothing reads them.
+  const MotionCompensationConfig defaults;
+  if (cfg.motion_compensation.max_imu_age != defaults.max_imu_age) {
+    RCLCPP_WARN(
+      logger_, "polka: motion_compensation.max_imu_age has no effect and can be removed");
+  }
+  if (cfg.motion_compensation.imu_frame != defaults.imu_frame) {
+    RCLCPP_WARN(
+      logger_, "polka: motion_compensation.imu_frame has no effect and can be removed; "
+      "the IMU frame comes from each message's header.frame_id");
+  }
+  return cfg;
   // Summary printed via PolkaNode startup banner once construction completes.
 }
 

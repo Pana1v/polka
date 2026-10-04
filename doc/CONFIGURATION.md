@@ -111,7 +111,9 @@ Sources whose time field is `FLOAT64` nanoseconds are not supported. If you have
 
 **Plausibility guard.** On the first message from a source, polka checks that the decoded per-point times land within 10 s of the header stamp. Beyond that the units or epoch have been misread, and deskewing on such values would scatter points across the map, so polka logs a warning naming the field, the datatype and the observed `max|dt|`, then runs that source without per-point timestamps. The bound is not a scan-duration limit: a unit misread is off by a factor of a thousand or more, so 10 s leaves ample room for slow aggregated frames while still catching the real failure.
 
-**Gravity subtraction.** Gravity comes out of `linear_acceleration` only when the IMU publishes a valid orientation (`orientation_covariance[0] >= 0` and a non-degenerate quaternion). Otherwise acceleration is zeroed and deskewing is rotation-only, which still helps, but translation during the scan goes uncorrected.
+**Gravity subtraction.** With a valid IMU orientation (`orientation_covariance[0] >= 0` and a non-degenerate quaternion), gravity is rotated out of `linear_acceleration`. Without one, polka subtracts an EMA estimate of body-frame gravity instead.
+
+**Rotation-only path.** The model translates a point by `0.5 * a * dt^2`, with no velocity term. When that stays under 1 mm over the whole scan, which holds for ground robots, polka skips translation and runs the cheaper rotation-only path. Translation from steady velocity is never corrected: at highway speeds feed a deskewed cloud from a LIO or odometry stack instead.
 
 ### Per-source IMU override
 

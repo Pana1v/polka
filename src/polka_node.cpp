@@ -219,6 +219,21 @@ Eigen::Vector3d PolkaNode::output_velocity(const rclcpp::Time & from, const rclc
   return velocity_at_frame(twist->linear, twist->angular, T_twist_out);
 }
 
+geometry_msgs::msg::TransformStamped PolkaNode::mount_pose(
+  const std::string & source_frame, const rclcpp::Time & stamp)
+{
+  // A lidar on a moving joint must be placed where the joint was at its own
+  // stamp. TF that has not reached the stamp yet (it often lags a live lidar)
+  // falls back to the newest pose. Other TF errors propagate.
+  try {
+    return tf_buffer_->lookupTransform(
+      config_.output_frame_id, source_frame, tf2_ros::fromRclcpp(stamp));
+  } catch (const tf2::ExtrapolationException &) {
+    return tf_buffer_->lookupTransform(
+      config_.output_frame_id, source_frame, tf2::TimePointZero);
+  }
+}
+
 std::unique_ptr<SourceAdapter> PolkaNode::make_adapter(
   const SourceConfig & sc, const MergeConfig & cfg)
 {
@@ -779,9 +794,7 @@ void PolkaNode::output_callback()
 
     Eigen::Isometry3d transform = Eigen::Isometry3d::Identity();
     try {
-      auto tf_msg = tf_buffer_->lookupTransform(
-        config_.output_frame_id, src.frame_id(), tf2::TimePointZero);
-      transform = tf2::transformToEigen(tf_msg.transform);
+      transform = tf2::transformToEigen(mount_pose(src.frame_id(), src.last_stamp()));
       slot.last_good_transform = transform;
     } catch (const tf2::TransformException & ex) {
       RCLCPP_WARN_THROTTLE(

@@ -4,6 +4,7 @@ Changelog for package polka
 
 Forthcoming
 -----------
+* Deskew and merge follow lidars on moving joints. On an articulated (center-steered) vehicle, odometry reports one body while front lidars ride the steering joint. ``odometry`` deskew now adds the lidar's velocity relative to the odometry frame, sampled from TF over the scan: on the real front-lidar scan in ``test/data``, 0.61 to 0.46 m/s, and 6 cm of error removed. Each cloud is now placed with its mount pose at its own stamp rather than the newest one: a joint turning 0.5 rad in between swung a point 2 m ahead by 1 m. Both fall back to the newest pose when TF has not reached the scan yet.
 * Learn each IMU's gyro bias whenever it stands still, and subtract it. Deskew applied the bias as a turn: on the polka#2 rig the front lidar's IMU reads 24.6 mrad/s parked, 4.3 cm off at 20 m on a test scan, now under 0.04 mm. A second of gyro spreading under 2 mrad/s per axis, with a mean under 35 mrad/s, counts as still; on the rig's 99 s recording that fired only while parked.
 * Fix the first deskewed scan of each source using the gyro in the IMU's own frame instead of the lidar's. It reversed the turn for upside-down (NED) IMUs, as built into many lidars: 13 cm off on a real scan.
 * Add a real-data deskew test on 0.3 s of the articulated-rig bag from #2 (``test/data/airy_turn.mcap``, 8.4 MB). New test dependencies: ``rosbag2_cpp``, ``rosbag2_storage_mcap``, ``tf2_msgs``.

@@ -481,7 +481,53 @@ Eigen::Vector3d SourceAdapter::sensor_velocity(
     }
   }
 
-  return velocity_at_frame(twist->linear, twist->angular, T_twist_sensor);
+  // On an articulated vehicle the sensor also moves within the twist's frame (a
+  // steering joint, say), which the twist cannot know about. Add that rate.
+  const Eigen::Vector3d chain_rate = lever_arm_rate(
+    twist->frame_id, sensor_frame, from, to, T_twist_sensor);
+
+  return velocity_at_frame(twist->linear, twist->angular, T_twist_sensor) +
+         T_twist_sensor.linear().transpose() * chain_rate;
+}
+
+Eigen::Vector3d SourceAdapter::lever_arm_rate(
+  const std::string & parent, const std::string & child,
+  const rclcpp::Time & from, const rclcpp::Time & to, Eigen::Isometry3d & T_mid)
+{
+  if (!tf_buffer_ || parent.empty() || parent == child) {return Eigen::Vector3d::Zero();}
+
+  // Sample the chain over a window as long as the scan, ending at the scan's end or
+  // at the newest transform before it: on a live robot the joint TF usually lags
+  // the lidar. A static chain has no newest stamp and so no rate.
+  const double span = (to - from).seconds();
+  if (span <= 0.0) {return Eigen::Vector3d::Zero();}
+
+  try {
+    const rclcpp::Time newest(
+      tf_buffer_->lookupTransform(parent, child, tf2::TimePointZero).header.stamp,
+      to.get_clock_type());
+    if (newest.nanoseconds() == 0) {return Eigen::Vector3d::Zero();}
+
+    const rclcpp::Time t2 = std::min(to, newest);
+    const rclcpp::Time t1 = t2 - rclcpp::Duration::from_seconds(span);
+    const rclcpp::Time t_mid = t2 - rclcpp::Duration::from_seconds(0.5 * span);
+    auto pose_at = [&](const rclcpp::Time & t) {
+        return tf2::transformToEigen(
+          tf_buffer_->lookupTransform(parent, child, tf2_ros::fromRclcpp(t)));
+      };
+    const Eigen::Isometry3d T1 = pose_at(t1);
+    const Eigen::Isometry3d T2 = pose_at(t2);
+    T_mid = pose_at(t_mid);
+    return (T2.translation() - T1.translation()) / span;
+  } catch (const tf2::TransformException & ex) {
+    // Not enough TF history yet: keep the newest pose, without the joint's rate.
+    RCLCPP_WARN_THROTTLE(
+      logger_, *node_->get_clock(), kLogThrottleNormalMs,
+      "polka: source '%s' cannot sample TF '%s' -> '%s' over the scan (%s), "
+      "deskewing without its rate", config_.name.c_str(), parent.c_str(), child.c_str(),
+      ex.what());
+    return Eigen::Vector3d::Zero();
+  }
 }
 
 void SourceAdapter::apply_filters(CloudT & cloud)

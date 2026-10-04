@@ -316,11 +316,11 @@ void SourceAdapter::deskew_cloud(
   if (!imu_ptr || !imu_ptr->valid) {return;}
   const AveragedImu & imu = *imu_ptr;
 
-  // Rotate IMU data from IMU frame into sensor frame (identity if same frame or TF unavailable)
+  // Rotate IMU data from IMU frame into sensor frame (identity if same frame or TF unavailable).
+  // The frame comes from this message: frame_id_ is only stored after the first cloud.
   Eigen::Matrix3d R_imu_to_sensor = Eigen::Matrix3d::Identity();
   if (tf_buffer_ && !imu.frame_id.empty()) {
-    std::string sensor_frame;
-    {std::lock_guard<std::mutex> lock(meta_mutex_); sensor_frame = frame_id_;}
+    const std::string & sensor_frame = raw_msg.header.frame_id;
     if (!sensor_frame.empty() && sensor_frame != imu.frame_id) {
       try {
         auto tf_msg = tf_buffer_->lookupTransform(

@@ -51,6 +51,12 @@ public:
 
   std::shared_ptr<const AveragedImu> snapshot() const;
 
+  // Mean angular velocity and acceleration over the samples stamped in
+  // [from, to], e.g. one scan. Falls back to snapshot() when fewer than two
+  // samples fall inside, such as a lidar on a different clock.
+  std::shared_ptr<const AveragedImu> average(
+    const rclcpp::Time & from, const rclcpp::Time & to) const;
+
   // Diagnostics accessors - independent of snapshot()/valid, so a diagnostics
   // tick can report "never received" vs. "receiving but degenerate" separately.
   const std::string & topic() const {return topic_;}
@@ -67,6 +73,7 @@ private:
   std::shared_ptr<const AveragedImu> snapshot_;
   std::atomic<uint64_t> msg_count_{0};
   rclcpp::Time last_stamp_{0, 0, RCL_ROS_TIME};
+  std::string frame_id_;
   int max_size_;
   rclcpp::Logger logger_;
   rclcpp::Clock::SharedPtr clock_;

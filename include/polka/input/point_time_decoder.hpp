@@ -136,24 +136,44 @@ constexpr double kMaxPlausibleAbsDtSec = 10.0;
 /// max|dt| over a strided sample of the cloud. Feeds the plausibility guard.
 /// Deliberately max|dt| and not the dt span: a span is offset-invariant, so it
 /// cannot see a source whose clock is skewed wholesale from the header stamp.
-inline double point_time_max_abs_dt(
+struct DtRange
+{
+  double min = 0.0;
+  double max = 0.0;
+};
+
+// Sampled [min, max] of per-point dt (seconds after header), plus the last point.
+inline DtRange point_time_dt_range(
   const PointTimeDecoder & decoder, const uint8_t * data,
   uint32_t point_step, size_t n, double header_sec)
 {
   constexpr size_t kSampleCount = 64;
-  if (n == 0 || data == nullptr) {return 0.0;}
+  DtRange range;
+  if (n == 0 || data == nullptr) {return range;}
 
   const size_t stride = std::max<size_t>(1, (n + kSampleCount - 1) / kSampleCount);
+  range.min = range.max = decoder.dt(data, header_sec);
 
-  double max_abs = 0.0;
+  auto take = [&](size_t i) {
+      const double dt = decoder.dt(data + i * point_step, header_sec);
+      range.min = std::min(range.min, dt);
+      range.max = std::max(range.max, dt);
+    };
   for (size_t i = 0; i < n; i += stride) {
-    max_abs = std::max(max_abs, std::abs(decoder.dt(data + i * point_step, header_sec)));
+    take(i);
   }
 
   // The extreme sits at the end of a scan, which a stride can step over.
-  max_abs = std::max(max_abs, std::abs(decoder.dt(data + (n - 1) * point_step, header_sec)));
+  take(n - 1);
+  return range;
+}
 
-  return max_abs;
+inline double point_time_max_abs_dt(
+  const PointTimeDecoder & decoder, const uint8_t * data,
+  uint32_t point_step, size_t n, double header_sec)
+{
+  const DtRange range = point_time_dt_range(decoder, data, point_step, n, header_sec);
+  return std::max(std::abs(range.min), std::abs(range.max));
 }
 
 }  // namespace polka

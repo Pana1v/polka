@@ -83,17 +83,20 @@ outputs:
 
 ## Motion compensation (IMU deskewing)
 
-Corrects for the robot moving while a LiDAR scan is being collected. Per-point deskewing runs an SE(3) exponential-map motion model off the IMU's angular velocity and linear acceleration, applied to each point by that point's own timestamp. Inter-source alignment handles timing offsets between sensors. The motion model is inspired by [rko_lio](https://github.com/PRBonn/rko_lio) (Malladi et al., 2025).
+Corrects for the robot moving while a LiDAR scan is being collected. Per-point deskewing runs an SE(3) exponential-map motion model, applied to each point by that point's own timestamp: rotation from the IMU's angular velocity, translation from the source `translation` names. Both are averaged over the scan's own time span, so one shock sample after the scan does not skew it. Inter-source alignment handles timing offsets between sensors with the same motion. The motion model follows [rko_lio](https://github.com/PRBonn/rko_lio) (Malladi et al., 2025).
 
 ```yaml
 motion_compensation:
   enabled: true
   imu_topic: "/imu/data"          # sensor_msgs/Imu topic (global, used by all sources)
-  max_imu_age: 0.2                # seconds, reject stale IMU
-  imu_buffer_size: 200            # ring buffer (~1 s at 200 Hz)
+  imu_buffer_size: 200            # IMU history (~1 s at 200 Hz); must span a scan
   per_point_deskew: true          # per-point correction within each scan
   deskew_timestamp_field: "auto"  # auto-detects 'time', 't', 'timestamp', etc.
+  translation: "imu_accel"        # "none" | "imu_accel" | "odometry"
+  odom_topic: ""                  # nav_msgs/Odometry, for "odometry"
 ```
+
+`max_imu_age` and `imu_frame` are still accepted so older configs load, but have no effect; polka warns at startup when either is set.
 
 **Per-point timestamp auto-detect.** With `deskew_timestamp_field: "auto"`, polka checks each `PointCloud2` for one of `time`, `t`, `timestamp`, `time_stamp`, `offset_time`, `timeStamp`. Name the field yourself if your driver calls it something else. If there is no usable field, polka logs once and falls back to whole-scan deskewing for that source.
 
@@ -113,7 +116,17 @@ Sources whose time field is `FLOAT64` nanoseconds are not supported. If you have
 
 **Gravity subtraction.** With a valid IMU orientation (`orientation_covariance[0] >= 0` and a non-degenerate quaternion), gravity is rotated out of `linear_acceleration`. Without one, polka subtracts an EMA estimate of body-frame gravity instead.
 
-**Rotation-only path.** The model translates a point by `0.5 * a * dt^2`, with no velocity term. When that stays under 1 mm over the whole scan, which holds for ground robots, polka skips translation and runs the cheaper rotation-only path. Translation from steady velocity is never corrected: at highway speeds feed a deskewed cloud from a LIO or odometry stack instead.
+**Translation.** Where the sensor's translation during a scan comes from:
+
+| `translation` | Translation over `dt` | Use when |
+|---|---|---|
+| `none` | none, rotation only | slow ground robots; rotation is where their skew is |
+| `imu_accel` (default) | `0.5 * a * dt^2` | no velocity source; corrects only *changes* in speed |
+| `odometry` | `v * dt` | wheel odometry or an EKF is available |
+
+An IMU measures acceleration, not velocity, so `imu_accel` assumes the sensor is at rest when the scan starts. Steady speed is the common case and it is invisible there: at 0.56 m/s, 5.6 cm of skew per 0.1 s scan stays. `odometry` reads `v` from `odom_topic`'s twist, which `nav_msgs/Odometry` gives in `child_frame_id`. polka moves it to each lidar's origin through TF, lever arm included: a lidar 0.6 m off-axis on a robot turning in place at 0.6 rad/s moves at 0.36 m/s while the base stands still. The odometry must not be computed from the clouds it deskews, or the loop feeds its own error back. When no fresh twist is available, polka deskews rotation only and warns.
+
+**Rotation-only path.** When the scan-wide translation stays under 1 mm, polka skips it and runs the cheaper rotation-only path.
 
 ### Per-source IMU override
 

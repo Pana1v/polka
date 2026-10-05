@@ -39,7 +39,7 @@ inline std::vector<std::unique_ptr<IFilter>> build_filter_chain(const FilterPara
     chain.push_back(std::make_unique<AngularFilter>(fp.angular_ranges, fp.angular_invert));
   }
   if (fp.box_filter_enabled) {
-    chain.push_back(std::make_unique<BoxFilter>(fp.box_min, fp.box_max));
+    chain.push_back(std::make_unique<BoxFilter>(fp.box_min, fp.box_max, fp.box_invert));
   }
   return chain;
 }

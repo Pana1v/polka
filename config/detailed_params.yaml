@@ -157,6 +157,7 @@ polka:
           # Box filter - keep points within an axis-aligned bounding box
           box:
             enabled: false
+            invert: false            # false = KEEP points inside, true = EXCLUDE them
             x_min: -20.0             # meters (behind / forward)
             x_max:  20.0
             y_min: -20.0             # meters (right / left)

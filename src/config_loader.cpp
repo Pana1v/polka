@@ -116,6 +116,7 @@ void ConfigLoader::declare_defaults()
   node_->declare_parameter<bool>("outputs.cloud.filters.box.enabled", false);
   node_->declare_parameter<double>("outputs.cloud.filters.box.x_min", -20.0);
   node_->declare_parameter<double>("outputs.cloud.filters.box.x_max", 20.0);
+  node_->declare_parameter<bool>("outputs.cloud.filters.box.invert", false);
   node_->declare_parameter<double>("outputs.cloud.filters.box.y_min", -20.0);
   node_->declare_parameter<double>("outputs.cloud.filters.box.y_max", 20.0);
   node_->declare_parameter<double>("outputs.cloud.filters.box.z_min", -2.0);
@@ -181,6 +182,7 @@ void ConfigLoader::declare_source_params(const std::string & name)
   node_->declare_parameter<bool>(p + ".filters.angular.invert", false);
   node_->declare_parameter<std::vector<double>>(p + ".filters.angular.ranges", {0.0, 360.0});
   node_->declare_parameter<bool>(p + ".filters.box.enabled", false);
+  node_->declare_parameter<bool>(p + ".filters.box.invert", true);
   node_->declare_parameter<double>(p + ".filters.box.x_min", -20.0);
   node_->declare_parameter<double>(p + ".filters.box.x_max", 20.0);
   node_->declare_parameter<double>(p + ".filters.box.y_min", -20.0);
@@ -224,6 +226,8 @@ FilterParams ConfigLoader::load_filter_params(const std::string & prefix)
 
   fp.box_filter_enabled = param_or<bool>(prefix + ".box.enabled", false);
   if (fp.box_filter_enabled) {
+    const bool default_box_invert = prefix.rfind("sources.", 0) == 0;
+    fp.box_invert = param_or<bool>(prefix + ".box.invert", default_box_invert);
     fp.box_min.x() = param_or<double>(prefix + ".box.x_min", -20.0);
     fp.box_max.x() = param_or<double>(prefix + ".box.x_max", 20.0);
     fp.box_min.y() = param_or<double>(prefix + ".box.y_min", -20.0);

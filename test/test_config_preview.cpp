@@ -75,6 +75,18 @@ TEST_F(ConfigPreviewTest, OverlayReadsProposedNotStoredValues)
     node_->get_parameter("sources.a.filters.range.enabled").as_bool());
 }
 
+TEST_F(ConfigPreviewTest, NewSourceBoxInvertMatchesDeclaredDefault)
+{
+  std::vector<rclcpp::Parameter> proposed = {
+    rclcpp::Parameter("sources.extra.filters.box.enabled", true),
+  };
+  auto cfg = loader_->preview(proposed, {"a", "b", "extra"});
+  ASSERT_EQ(cfg.sources.size(), 3u);
+  EXPECT_TRUE(cfg.sources[2].filter_params.box_filter_enabled);
+  EXPECT_TRUE(cfg.sources[2].filter_params.box_invert);
+  EXPECT_FALSE(node_->has_parameter("sources.extra.filters.box.invert"));
+}
+
 TEST_F(ConfigPreviewTest, RejectionReasonNamesTheOffendingPrefix)
 {
   std::vector<rclcpp::Parameter> proposed = {

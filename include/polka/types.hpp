@@ -94,6 +94,7 @@ struct FilterParams
   bool angular_filter_enabled = false;
   bool angular_invert = false;
   bool box_filter_enabled = false;
+  bool box_invert = false;
 
   Eigen::Vector3d box_min = Eigen::Vector3d(-100.0, -100.0, -100.0);
   Eigen::Vector3d box_max = Eigen::Vector3d(100.0, 100.0, 100.0);

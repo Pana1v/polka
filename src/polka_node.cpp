@@ -26,6 +26,7 @@
 #include <cmath>
 #include <functional>
 #include <sstream>
+#include <stdexcept>
 #include <utility>
 
 #include "polka/util/log_format.hpp"
@@ -102,7 +103,13 @@ PolkaNode::PolkaNode(const rclcpp::NodeOptions & options)
     int device_count = 0;
     cudaGetDeviceCount(&device_count);
     if (device_count > 0) {
-      merge_engine_ = std::make_unique<CudaMergeEngine>(config_);
+      try {
+        merge_engine_ = std::make_unique<CudaMergeEngine>(config_);
+      } catch (const std::runtime_error & e) {
+        RCLCPP_WARN(
+          get_logger(),
+          "polka: CUDA device unusable (%s), falling back to CPU", e.what());
+      }
     } else {
       RCLCPP_WARN(
         get_logger(),

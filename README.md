@@ -1,6 +1,11 @@
 # POLKA
 
+> **Documentation: [polka-ros.github.io][docs].** This README covers install and a first launch;
+> configuration, the pipeline, architecture, deskew and performance are on the site.
+
 <p align="center">
+  <a href="https://polka-ros.github.io/"><img src="https://img.shields.io/badge/docs-polka--ros.github.io-3F51B5?logo=materialformkdocs&logoColor=white" alt="Documentation"/></a>
+  <br/>
   <a href="https://github.com/Pana1v/polka/tree/humble"><img src="https://img.shields.io/badge/ROS_2-Humble-22314E?logo=ros&logoColor=white" alt="ROS 2 Humble"/></a>
   <a href="https://github.com/Pana1v/polka/tree/iron"><img src="https://img.shields.io/badge/ROS_2-Iron-22314E?logo=ros&logoColor=white" alt="ROS 2 Iron"/></a>
   <a href="https://github.com/Pana1v/polka/tree/jazzy"><img src="https://img.shields.io/badge/ROS_2-Jazzy-22314E?logo=ros&logoColor=white" alt="ROS 2 Jazzy"/></a>
@@ -27,9 +32,7 @@
   <a href="https://polka-ros.github.io/"><img src="https://polka-ros.github.io/images/polka.png" alt="Polka" width="640"/></a>
 </p>
 
-**Multi-LiDAR fusion node for ROS 2.** Takes any mix of PointCloud2 and LaserScan sources and publishes one merged PointCloud2, one merged LaserScan, or both. Filters per source and on the output, deskews with IMU and odometry, and uses CUDA if you build it in. One node instead of a relay, filter, transform, merge and downsample chain.
-
-**Documentation: [polka-ros.github.io](https://polka-ros.github.io/)**: [install](https://polka-ros.github.io/install.html), [configuration](https://polka-ros.github.io/configuration.html), [pipeline](https://polka-ros.github.io/pipeline.html), [architecture](https://polka-ros.github.io/architecture.html), [deskew](https://polka-ros.github.io/deskew.html), [performance](https://polka-ros.github.io/performance.html).
+**Multi-LiDAR fusion node for ROS 2.** Takes any mix of PointCloud2 and LaserScan sources and publishes one merged PointCloud2, one merged LaserScan, or both. Filters per source and on the output, deskews with IMU and odometry, and uses CUDA when an NVIDIA GPU is present. One node instead of a relay, filter, transform, merge and downsample chain.
 
 <p align="center">
   <img src="https://polka-ros.github.io/gifs/filter_box.gif" width="400" alt="box filter"/>
@@ -77,10 +80,30 @@ cp config/example_params.yaml config/my_robot.yaml      # edit topics + output_f
 ros2 launch polka polka.launch.py config_file:=config/my_robot.yaml
 ```
 
-Point `output_frame_id` at your base frame, list your sensors under `source_names`, and check that TF resolves every sensor `frame_id` to `output_frame_id`. Playing a bag? Pass `use_sim_time:=true` and play with `--clock` (see [Configuration](https://polka-ros.github.io/configuration.html#rosbag--simulation-playback)).
+Point `output_frame_id` at your base frame, list your sensors under `source_names`, and check that TF resolves every sensor `frame_id` to `output_frame_id`. Playing a bag? Pass `use_sim_time:=true` and play with `--clock` (see [Configuration: bag playback][bag]).
 
 Branch maintenance across distros: [MAINTAINING.md](MAINTAINING.md).
+
+## Documentation
+
+Everything beyond install lives on **[polka-ros.github.io][docs]**:
+
+- **[Install][install]**: apt packages with CUDA built in, or build from source
+- **[Configuration][configuration]**: every parameter, filters, IMU deskewing, bag playback
+- **[Pipeline][pipeline]**: what polka replaces, the internal stages, the file layout
+- **[Architecture][architecture]**: the CPU and CUDA merge engines, filters, source adapters, threading
+- **[Deskew][deskew]**: how big skew gets, and what deskew fixes on public KITTI data
+- **[Performance][performance]**: deskew cost against GLIM, rko_lio and LIO-SAM, the CPU/CUDA crossover
 
 ## License and credits
 
 Apache-2.0. The per-point deskewing motion model is inspired by [rko_lio](https://github.com/PRBonn/rko_lio) (Malladi et al., 2025, [arXiv:2509.06593](https://arxiv.org/pdf/2509.06593)).
+
+[docs]: https://polka-ros.github.io/
+[install]: https://polka-ros.github.io/install.html
+[configuration]: https://polka-ros.github.io/configuration.html
+[bag]: https://polka-ros.github.io/configuration.html#rosbag--simulation-playback
+[pipeline]: https://polka-ros.github.io/pipeline.html
+[architecture]: https://polka-ros.github.io/architecture.html
+[deskew]: https://polka-ros.github.io/deskew.html
+[performance]: https://polka-ros.github.io/performance.html

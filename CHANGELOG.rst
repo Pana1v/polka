@@ -2,6 +2,12 @@
 Changelog for package polka
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+0.6.1 (2026-10-17)
+------------------
+* Install from apt: CUDA-enabled packages for Humble, Jazzy, Kilted, Lyrical and Rolling at ``polka-ros.github.io``. See the README.
+* The CUDA build links the CUDA runtime statically, so it needs only the NVIDIA driver at run time. Adds sm_89 and PTX, so GPUs newer than the listed architectures still run.
+* Fall back to the CPU engine when a GPU is found but can't be set up (seen after suspend/resume: "CUDA-capable device(s) is/are busy or unavailable"). The node used to keep the CUDA engine on failed allocations and log an error on every call. (#62)
+
 0.6.0 (2026-10-04)
 ------------------
 * Add ``doc/DESKEW.md``: how big skew gets, and what deskew fixes on public KITTI data. README and ``doc/PERFORMANCE.md`` gain figures for translation modes, the articulated rig from #2, and deskew cost against GLIM, rko_lio and LIO-SAM. Performance numbers are re-measured on public clouds. ``perf_summary.svg`` is gone; it showed a 0.5.0 deskew gain that never applied.

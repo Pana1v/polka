@@ -21,6 +21,7 @@
 #include <algorithm>
 #include <cmath>
 #include <stdexcept>
+#include <string>
 
 #define POLKA_CUDA_CHECK(call)                                          \
   do {                                                                  \
@@ -37,6 +38,16 @@
     if (err != cudaSuccess) {                                           \
       fprintf(stderr, "[polka] CUDA kernel launch error at %s:%d: %s\n", \
               __FILE__, __LINE__, cudaGetErrorString(err));             \
+    }                                                                   \
+  } while (0)
+
+// For setup, where a failure means the device is unusable and the node must fall back to CPU.
+#define POLKA_CUDA_REQUIRE(call)                                        \
+  do {                                                                  \
+    cudaError_t err = (call);                                           \
+    if (err != cudaSuccess) {                                           \
+      throw std::runtime_error(                                         \
+        std::string(#call) + ": " + cudaGetErrorString(err));           \
     }                                                                   \
   } while (0)
 
@@ -329,7 +340,30 @@ struct CudaMergeEngine::Impl {
   float4 * h_buf_out = nullptr;
   double * h_time_out = nullptr;
 
-  cudaStream_t stream;
+  cudaStream_t stream = nullptr;
+
+  void release()
+  {
+    cudaFree(d_buf_a);
+    cudaFree(d_buf_b);
+    cudaFree(d_time_a);
+    cudaFree(d_time_b);
+    cudaFree(d_count_a);
+    cudaFree(d_count_b);
+    cudaFree(d_tf);
+    cudaFree(d_voxel_keys);
+    cudaFree(d_voxel_points);
+    cudaFree(d_voxel_time);
+    cudaFree(d_scan_ranges_int);
+    cudaFree(d_scan_ranges_float);
+    cudaFreeHost(h_buf_in);
+    cudaFreeHost(h_time_in);
+    cudaFreeHost(h_buf_out);
+    cudaFreeHost(h_time_out);
+    if (stream) {
+      cudaStreamDestroy(stream);
+    }
+  }
 
   GpuFilterParams to_gpu_filter(const FilterParams & fp) {
     GpuFilterParams gf{};
@@ -431,48 +465,38 @@ CudaMergeEngine::CudaMergeEngine(const MergeConfig & config)
 {
   impl_->max_total_points = impl_->max_points_per_source * config.sources.size();
 
-  POLKA_CUDA_CHECK(cudaMalloc(&impl_->d_buf_a, impl_->max_total_points * sizeof(float4)));
-  POLKA_CUDA_CHECK(cudaMalloc(&impl_->d_buf_b, impl_->max_total_points * sizeof(float4)));
-  POLKA_CUDA_CHECK(cudaMalloc(&impl_->d_time_a, impl_->max_total_points * sizeof(double)));
-  POLKA_CUDA_CHECK(cudaMalloc(&impl_->d_time_b, impl_->max_total_points * sizeof(double)));
-  POLKA_CUDA_CHECK(cudaMalloc(&impl_->d_count_a, sizeof(int)));
-  POLKA_CUDA_CHECK(cudaMalloc(&impl_->d_count_b, sizeof(int)));
-  POLKA_CUDA_CHECK(cudaMalloc(&impl_->d_tf, 16 * sizeof(float)));
+  try {
+    POLKA_CUDA_REQUIRE(cudaMalloc(&impl_->d_buf_a, impl_->max_total_points * sizeof(float4)));
+    POLKA_CUDA_REQUIRE(cudaMalloc(&impl_->d_buf_b, impl_->max_total_points * sizeof(float4)));
+    POLKA_CUDA_REQUIRE(cudaMalloc(&impl_->d_time_a, impl_->max_total_points * sizeof(double)));
+    POLKA_CUDA_REQUIRE(cudaMalloc(&impl_->d_time_b, impl_->max_total_points * sizeof(double)));
+    POLKA_CUDA_REQUIRE(cudaMalloc(&impl_->d_count_a, sizeof(int)));
+    POLKA_CUDA_REQUIRE(cudaMalloc(&impl_->d_count_b, sizeof(int)));
+    POLKA_CUDA_REQUIRE(cudaMalloc(&impl_->d_tf, 16 * sizeof(float)));
 
-  POLKA_CUDA_CHECK(cudaMalloc(&impl_->d_voxel_keys, POLKA_VOXEL_TABLE_SIZE * sizeof(int)));
-  POLKA_CUDA_CHECK(cudaMalloc(&impl_->d_voxel_points, POLKA_VOXEL_TABLE_SIZE * sizeof(float4)));
-  POLKA_CUDA_CHECK(cudaMalloc(&impl_->d_voxel_time, POLKA_VOXEL_TABLE_SIZE * sizeof(double)));
+    POLKA_CUDA_REQUIRE(cudaMalloc(&impl_->d_voxel_keys, POLKA_VOXEL_TABLE_SIZE * sizeof(int)));
+    POLKA_CUDA_REQUIRE(cudaMalloc(&impl_->d_voxel_points, POLKA_VOXEL_TABLE_SIZE * sizeof(float4)));
+    POLKA_CUDA_REQUIRE(cudaMalloc(&impl_->d_voxel_time, POLKA_VOXEL_TABLE_SIZE * sizeof(double)));
 
-  POLKA_CUDA_CHECK(cudaMalloc(&impl_->d_scan_ranges_int, POLKA_MAX_SCAN_BINS * sizeof(int)));
-  POLKA_CUDA_CHECK(cudaMalloc(&impl_->d_scan_ranges_float, POLKA_MAX_SCAN_BINS * sizeof(float)));
+    POLKA_CUDA_REQUIRE(cudaMalloc(&impl_->d_scan_ranges_int, POLKA_MAX_SCAN_BINS * sizeof(int)));
+    POLKA_CUDA_REQUIRE(cudaMalloc(&impl_->d_scan_ranges_float, POLKA_MAX_SCAN_BINS * sizeof(float)));
 
-  POLKA_CUDA_CHECK(cudaMallocHost(&impl_->h_buf_in, impl_->max_total_points * sizeof(float4)));
-  POLKA_CUDA_CHECK(cudaMallocHost(&impl_->h_time_in, impl_->max_total_points * sizeof(double)));
-  POLKA_CUDA_CHECK(cudaMallocHost(&impl_->h_buf_out, impl_->max_total_points * sizeof(float4)));
-  POLKA_CUDA_CHECK(cudaMallocHost(&impl_->h_time_out, impl_->max_total_points * sizeof(double)));
+    POLKA_CUDA_REQUIRE(cudaMallocHost(&impl_->h_buf_in, impl_->max_total_points * sizeof(float4)));
+    POLKA_CUDA_REQUIRE(cudaMallocHost(&impl_->h_time_in, impl_->max_total_points * sizeof(double)));
+    POLKA_CUDA_REQUIRE(cudaMallocHost(&impl_->h_buf_out, impl_->max_total_points * sizeof(float4)));
+    POLKA_CUDA_REQUIRE(cudaMallocHost(&impl_->h_time_out, impl_->max_total_points * sizeof(double)));
 
-  POLKA_CUDA_CHECK(cudaStreamCreate(&impl_->stream));
+    POLKA_CUDA_REQUIRE(cudaStreamCreate(&impl_->stream));
+  } catch (...) {
+    impl_->release();
+    delete impl_;
+    throw;
+  }
 }
 
 CudaMergeEngine::~CudaMergeEngine()
 {
-  cudaFree(impl_->d_buf_a);
-  cudaFree(impl_->d_buf_b);
-  cudaFree(impl_->d_time_a);
-  cudaFree(impl_->d_time_b);
-  cudaFree(impl_->d_count_a);
-  cudaFree(impl_->d_count_b);
-  cudaFree(impl_->d_tf);
-  cudaFree(impl_->d_voxel_keys);
-  cudaFree(impl_->d_voxel_points);
-  cudaFree(impl_->d_voxel_time);
-  cudaFree(impl_->d_scan_ranges_int);
-  cudaFree(impl_->d_scan_ranges_float);
-  cudaFreeHost(impl_->h_buf_in);
-  cudaFreeHost(impl_->h_time_in);
-  cudaFreeHost(impl_->h_buf_out);
-  cudaFreeHost(impl_->h_time_out);
-  cudaStreamDestroy(impl_->stream);
+  impl_->release();
   delete impl_;
 }
 

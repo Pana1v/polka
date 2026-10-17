@@ -21,6 +21,7 @@
 #define POLKA_MAX_SCAN_BINS 4096
 
 struct GpuFilterParams {
+  bool range_enabled;
   float min_range_sq;
   float max_range_sq;
   bool angular_enabled;

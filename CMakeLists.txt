@@ -160,6 +160,11 @@ if(BUILD_TESTING)
     target_link_libraries(${test_name} polka_core)
   endforeach()
 
+  if(WITH_CUDA)
+    ament_add_gtest(test_cuda_range_filter test/test_cuda_range_filter.cpp)
+    target_link_libraries(test_cuda_range_filter polka_core)
+  endif()
+
   # test_deskew replays a real bag fragment (test/data/airy_turn.mcap).
   find_package(rosbag2_cpp REQUIRED)
   find_package(tf2_msgs REQUIRED)

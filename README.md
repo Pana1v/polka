@@ -1,185 +1,58 @@
 # POLKA
 
 <p align="center">
-  <a href="https://github.com/Pana1v/polka/tree/humble"><img src="https://img.shields.io/badge/ROS_2-Humble-22314E?logo=ros&logoColor=white" alt="ROS 2 Humble"/></a>
-  <a href="https://github.com/Pana1v/polka/tree/iron"><img src="https://img.shields.io/badge/ROS_2-Iron-22314E?logo=ros&logoColor=white" alt="ROS 2 Iron"/></a>
-  <a href="https://github.com/Pana1v/polka/tree/jazzy"><img src="https://img.shields.io/badge/ROS_2-Jazzy-22314E?logo=ros&logoColor=white" alt="ROS 2 Jazzy"/></a>
-  <a href="https://github.com/Pana1v/polka/tree/kilted"><img src="https://img.shields.io/badge/ROS_2-Kilted-22314E?logo=ros&logoColor=white" alt="ROS 2 Kilted"/></a>
-  <a href="https://github.com/Pana1v/polka/tree/lyrical"><img src="https://img.shields.io/badge/ROS_2-Lyrical-22314E?logo=ros&logoColor=white" alt="ROS 2 Lyrical"/></a>
-  <a href="https://github.com/Pana1v/polka/tree/rolling"><img src="https://img.shields.io/badge/ROS_2-Rolling-22314E?logo=ros&logoColor=white" alt="ROS 2 Rolling"/></a>
-  <br/>
-  <img src="https://img.shields.io/badge/Ubuntu-22.04-E95420?logo=ubuntu&logoColor=white" alt="Ubuntu 22.04"/>
-  <img src="https://img.shields.io/badge/Ubuntu-24.04-E95420?logo=ubuntu&logoColor=white" alt="Ubuntu 24.04"/>
-  <img src="https://img.shields.io/badge/Ubuntu-26.04-E95420?logo=ubuntu&logoColor=white" alt="Ubuntu 26.04"/>
-  <br/>
-  <img src="https://img.shields.io/badge/C%2B%2B-17-00599C?logo=cplusplus&logoColor=white" alt="C++17"/>
+  <a href="https://polka-ros.github.io/"><img src="https://img.shields.io/badge/docs-polka--ros.github.io-3F51B5?logo=materialformkdocs&logoColor=white" alt="Documentation"/></a>
+  <img src="https://img.shields.io/badge/ROS_2-Humble_|_Jazzy_|_Kilted_|_Lyrical_|_Rolling-22314E?logo=ros&logoColor=white" alt="ROS 2 distros"/>
   <img src="https://img.shields.io/badge/CUDA-optional-76B900?logo=nvidia&logoColor=white" alt="CUDA optional"/>
-  <img src="https://img.shields.io/badge/PCL-point_cloud-2a9d8f" alt="PCL"/>
-  <img src="https://img.shields.io/badge/build-colcon-blue?logo=ros&logoColor=white" alt="colcon"/>
-  <br/>
   <a href="LICENSE"><img src="https://img.shields.io/github/license/Pana1v/polka?color=blue" alt="License: Apache-2.0"/></a>
-  <a href="https://github.com/Pana1v/polka/stargazers"><img src="https://img.shields.io/github/stars/Pana1v/polka?style=flat" alt="GitHub stars"/></a>
-  <a href="https://github.com/Pana1v/polka/issues"><img src="https://img.shields.io/github/issues/Pana1v/polka" alt="GitHub issues"/></a>
-  <a href="https://github.com/Pana1v/polka/commits"><img src="https://img.shields.io/github/last-commit/Pana1v/polka" alt="Last commit"/></a>
 </p>
 
 <p align="center">
-  <img src="doc/images/polka.png" alt="Polka" width="640"/>
-  
-  <img width="400" height="200" alt="Screencastfrom2026-07-2510-38-51-ezgif com-optimize   (2)" src="https://github.com/user-attachments/assets/66b65b81-c373-4af6-aa05-a58d402779d7" />
-  <img width="880" height="433" alt="image" src="https://github.com/user-attachments/assets/a106e9d9-d31d-474e-ad82-1b3153ffb890" />
-
-
-</p>
-  
-**Multi-LiDAR fusion node for ROS 2.** Takes any mix of PointCloud2 and LaserScan sources and publishes one merged PointCloud2, one merged LaserScan, or both. Filters per source and on the output, deskews with IMU and odometry, and uses CUDA if you build it in. One node instead of a relay, filter, transform, merge and downsample chain.
-
-## Features in action
-
-Each clip is polka with a different config, run on the [TIERS multi-LiDAR dataset](https://github.com/TIERS/multi_lidar_multi_uav_dataset) (Ouster OS1 + Livox Avia + Mid-360) and rendered headless with Open3D. [`doc/media/`](doc/media/) has the scripts to regenerate them.
-
-<table>
-<tr>
-<td width="50%"><img src="doc/media/gifs/filter_range.gif" alt="range filter"/><br/><em>Range filter: keep points within a distance shell</em></td>
-<td width="50%"><img src="doc/media/gifs/filter_angular.gif" alt="angular filter"/><br/><em>Angular filter: keep a yaw sector</em></td>
-</tr>
-<tr>
-<td width="50%"><img src="doc/media/gifs/filter_box.gif" alt="box filter"/><br/><em>Box filter: crop to an axis-aligned box</em></td>
-<td width="50%"><img src="doc/media/gifs/filter_height.gif" alt="height cap"/><br/><em>Height cap: clip to a z-range</em></td>
-</tr>
-<tr>
-<td width="50%"><img src="doc/media/gifs/angular_invert.gif" alt="angular invert flag"/><br/><em>Angular <code>invert</code> flag: keep vs. exclude a sector</em></td>
-<td width="50%"><img src="doc/media/gifs/self_filter.gif" alt="self filter"/><br/><em>Self-filter: remove the robot's own footprint</em></td>
-</tr>
-<tr>
-<td width="50%"><img src="doc/media/gifs/voxel.gif" alt="voxel downsample"/><br/><em>Voxel downsample: 69k to 5k points</em></td>
-<td width="50%"><img src="doc/media/gifs/dual_output.gif" alt="dual output"/><br/><em>Dual output: merged cloud plus flattened 2D scan</em></td>
-</tr>
-<tr>
-<td colspan="2" align="center"><img src="doc/media/gifs/scan_merge.gif" alt="2D LaserScan merge" width="780"/><br/><em>2D LaserScan merge: each beam colored by the sensor with the nearest return</em></td>
-</tr>
-</table>
-
-<p align="center">
-  <img src="doc/media/gifs/deskew_3d.gif" alt="three lidars on an articulated vehicle: sweep, deskew, filter, merge" width="560"/>
-  <br/>
-  <em>Simulated: three lidars on the articulated rig from <a href="https://github.com/Pana1v/polka/issues/2">#2</a>, geometry from its bag's TF. Each sweep is deskewed with IMU, odometry and steering-joint rate, filtered per source, merged and filtered again.</em>
+  <a href="https://polka-ros.github.io/"><img src="https://polka-ros.github.io/images/polka.png" alt="Polka" width="640"/></a>
 </p>
 
-## Performance
+**Multi-LiDAR fusion node for ROS 2.** Merges any mix of PointCloud2 and LaserScan sources into one cloud, one scan, or both, with per-source and output filters, IMU/odometry deskew, and CUDA when an NVIDIA GPU is present. It replaces a relay, filter, transform, merge and downsample chain.
+
+**Documentation: [polka-ros.github.io][docs]**
 
 <p align="center">
-  <img src="doc/images/deskew_cost.png" alt="deskew time per point: polka, GLIM, rko_lio, LIO-SAM" width="620"/>
-</p>
-
-**Deskew.** 3.3 ns per point rotation-only, 4.4 with translation: 1.5 to 7x cheaper than the deskew step of GLIM, rko_lio and LIO-SAM on the same public clouds. Method and versions in [Performance](doc/PERFORMANCE.md#deskew-against-other-stacks).
-
-**CUDA.** The GPU merge engine does transform, filter, voxel and scan flatten in one pass over the points, which pays off on heavy pipelines. On a filterless merge the CPU stays competitive — there is not enough per-point work to hide the kernel dispatch and the host-to-device copy. Build with `-DWITH_CUDA=ON` and it falls back to CPU on its own. It is not faster everywhere.
-Any binary package installed with `apt` is CPU-only: the ROS build farm has no CUDA toolchain,
-so the GPU engine is compiled out there. Build from source to get it.
-
-**Bandwidth.** polka turns N sensor streams into one topic, so downstream nodes subscribe once instead of once per sensor. Voxel downsampling thins that cloud further if you want it, by as much as you set with `leaf_size` — in the demo clip 69k points become 5k, but that is one leaf size, not a fixed ratio or a 0.5.0 speedup.
-
-[Performance notes](doc/PERFORMANCE.md) covers where the numbers come from and when CUDA stops paying off.
-
-## Features
-
-- **Heterogeneous fusion**: mix 3D PointCloud2 and 2D LaserScan sources freely
-- **Dual output**: merged PointCloud2, LaserScan, or both at once
-- **Per-source and output filtering**: range, angular, box, height cap, footprint (ego-body) exclusion, voxel downsample
-- **Deskewing**: per-point SE(3) motion correction, cost independent of point order; translation from odometry, IMU, or none; gyro bias learned at standstill; per-point timestamp auto-detect
-- **CUDA acceleration**: optional GPU merge engine, falls back to CPU
-- **TF2 integration**: automatic lookup with last-known-good fallback
-- **Runtime reconfiguration**: filters, outputs, deskewing and the source list all change live via `ros2 param set`, no restart
-- **Diagnostics and a terminal dashboard**: per-source rate, bandwidth and lag on `/diagnostics`, drift flags, and an optional `polka_monitor` TUI
-- **Composable node**: runs standalone or in a component container
-
-## Sensor and IMU support
-
-| Capability | Supported | How |
-|---|---|---|
-| 3D PointCloud2 | yes | native |
-| 2D LaserScan | yes | projected and merged |
-| Single global IMU | yes | `motion_compensation.imu_topic` |
-| Multiple IMUs (per source) | yes | `sources.<name>.imu_topic` |
-| Decentralized IMUs (different mounts) | yes | TF rotates angular velocity and acceleration into each sensor frame |
-| External IMU per lidar | yes | any `sensor_msgs/Imu` frame with a TF to the lidar |
-| Articulated IMUs (moving joint or turret) | yes | dynamic TF from `joint_states`; `config/example_articulated_imu.yaml` |
-| Velocity from odometry | yes | `motion_compensation.translation: odometry`, lever arm and joint rate from TF |
-
-Every source can have its own IMU on its own mount. polka looks up the live TF from each IMU frame to its sensor frame and rotates that IMU's angular velocity and acceleration into the sensor frame before deskewing, so a fixed chassis LiDAR and a rotating turret LiDAR each deskew against the motion they actually see:
-
-```mermaid
-graph LR
-  gimu[global IMU] -->|TF into sensor frame| chassis[chassis LiDAR]
-  timu[turret IMU] -->|TF into sensor frame| turret[turret LiDAR]
-  chassis --> polka
-  turret --> polka
-  polka --> merged[one merged cloud]
-```
-
-### Translation
-
-An IMU gives rotation and changes in speed, not speed itself, so steady motion leaves skew behind. `translation: odometry` takes velocity from any `nav_msgs/Odometry` (wheels, an EKF, GNSS), moved to each lidar's origin through TF. That source must be independent of the clouds being deskewed.
-
-<p align="center">
-  <img src="doc/images/polka_modes.png" alt="RMS error against truth: no deskew, translation none, translation odometry" width="560"/>
-  <br/>
-  <em>polka_node on a synthetic stream with exact truth.</em>
-</p>
-
-### Articulated vehicles
-
-<p align="center">
-  <img src="doc/images/rig_layout.png" alt="three lidars on a center-steered vehicle, top and side view" width="620"/>
-  <br/>
-  <em>The rig from <a href="https://github.com/Pana1v/polka/issues/2">#2</a> as read from its bag's TF. Positions measured, body outlines schematic.</em>
-</p>
-
-Odometry reports the rear body; the front lidars ride the steering joint. polka adds each lidar's rate relative to the odometry frame, sampled from TF over the scan, and places every cloud with its mount pose at its own stamp. On the real front-lidar scan in `test/data` that takes the lidar's speed from 0.61 to 0.46 m/s and removes 6 cm of error.
-
-<p align="center">
-  <img src="doc/images/rig_skew_map.png" alt="raw skew per 5 cm cell on the rear lidar during a turn" width="360"/>
-  <br/>
-  <em>Raw skew on the rig's rear lidar at its sharpest turn, top view.</em>
+  <img src="https://polka-ros.github.io/gifs/filter_box.gif" width="400" alt="box filter"/>
+  <img src="https://polka-ros.github.io/gifs/deskew_3d.gif" width="400" alt="deskew"/>
 </p>
 
 ## Install
 
-One branch per ROS 2 distro, same code on each:
+From apt, with CUDA built in (amd64; needs only the NVIDIA driver, falls back to CPU without a GPU):
 
-| Distro | Ubuntu | Branch |
-|--------|--------|--------|
-| Humble | 22.04 | [`humble`](../../tree/humble) |
-| Iron | 22.04 | [`iron`](../../tree/iron) |
-| Jazzy | 24.04 | [`jazzy`](../../tree/jazzy) |
-| Kilted | 24.04 | [`kilted`](../../tree/kilted) |
-| Lyrical | 26.04 | [`lyrical`](../../tree/lyrical) |
-| Rolling | 26.04 | [`rolling`](../../tree/rolling) |
+```bash
+sudo curl -fsSL https://polka-ros.github.io/polka.gpg -o /usr/share/keyrings/polka.gpg
+echo "deb [signed-by=/usr/share/keyrings/polka.gpg] https://polka-ros.github.io $(. /etc/os-release && echo $VERSION_CODENAME) main" \
+  | sudo tee /etc/apt/sources.list.d/polka.list
+sudo apt update && sudo apt install ros-$ROS_DISTRO-polka
+```
+
+From source, using the branch named after your distro:
 
 ```bash
 git clone -b humble https://github.com/Pana1v/polka.git ~/ros2_ws/src/polka
-cd ~/ros2_ws && colcon build --packages-select polka
-# add  --cmake-args -DWITH_CUDA=ON  for the GPU merge engine
+cd ~/ros2_ws && colcon build --packages-select polka   # CUDA engine is built when nvcc is found
 ```
+
+Driver versions, distro branches and details: [Install][install].
 
 ## Quick start
 
 ```bash
-cp config/example_params.yaml config/my_robot.yaml      # edit topics + output_frame_id
+cp config/example_params.yaml config/my_robot.yaml   # set your topics and output_frame_id
 ros2 launch polka polka.launch.py config_file:=config/my_robot.yaml
 ```
 
-Point `output_frame_id` at your base frame, list your sensors under `source_names`, and check that TF resolves every sensor `frame_id` to `output_frame_id`. Playing a bag? Pass `use_sim_time:=true` and play with `--clock` (see [Configuration](doc/CONFIGURATION.md#rosbag--simulation-playback)).
+Then see [Configuration][configuration].
 
-## Documentation
+## License
 
-- **[Configuration](doc/CONFIGURATION.md)**: every parameter, filters, IMU deskewing, bag playback
-- **[Pipeline and architecture](doc/PIPELINE.md)**: what polka replaces, the internal stages, the file layout
-- **[Deskew](doc/DESKEW.md)**: how big skew gets, and what deskew fixes on public KITTI data
-- **[Performance](doc/PERFORMANCE.md)**: deskew cost against GLIM, rko_lio and LIO-SAM, the CPU/CUDA crossover, bandwidth
-- **[Maintaining distro branches](MAINTAINING.md)**: how the six branches stay in sync
+Apache-2.0. The per-point deskew model is inspired by [rko_lio](https://github.com/PRBonn/rko_lio) ([arXiv:2509.06593](https://arxiv.org/pdf/2509.06593)). Maintainers: [MAINTAINING.md](MAINTAINING.md).
 
-## License and credits
-
-Apache-2.0. The per-point deskewing motion model is inspired by [rko_lio](https://github.com/PRBonn/rko_lio) (Malladi et al., 2025, [arXiv:2509.06593](https://arxiv.org/pdf/2509.06593)).
+[docs]: https://polka-ros.github.io/
+[install]: https://polka-ros.github.io/install.html
+[configuration]: https://polka-ros.github.io/configuration.html

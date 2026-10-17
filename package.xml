@@ -2,8 +2,8 @@
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
   <name>polka</name>
-  <version>0.6.0</version>
-  <description>ROS2 composable node for multi-LiDAR fusion with optional CUDA acceleration (binary packages are CPU-only; build from source with -DWITH_CUDA=ON for the GPU merge engine).</description>
+  <version>0.6.1</version>
+  <description>ROS 2 composable node for multi-LiDAR fusion with optional CUDA acceleration. Packages from https://polka-ros.github.io include the CUDA merge engine and fall back to CPU without a GPU; ROS build farm packages are CPU-only.</description>
   <maintainer email="praajarpit@gmail.com">Panav Arpit Raaj</maintainer>
   <license>Apache-2.0</license>
 

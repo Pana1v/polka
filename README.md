@@ -75,8 +75,8 @@ Each clip is polka with a different config, run on the [TIERS multi-LiDAR datase
 **Deskew.** 3.3 ns per point rotation-only, 4.4 with translation: 1.5 to 7x cheaper than the deskew step of GLIM, rko_lio and LIO-SAM on the same public clouds. Method and versions in [Performance](doc/PERFORMANCE.md#deskew-against-other-stacks).
 
 **CUDA.** The GPU merge engine does transform, filter, voxel and scan flatten in one pass over the points, which pays off on heavy pipelines. On a filterless merge the CPU stays competitive — there is not enough per-point work to hide the kernel dispatch and the host-to-device copy. Build with `-DWITH_CUDA=ON` and it falls back to CPU on its own. It is not faster everywhere.
-Any binary package installed with `apt` is CPU-only: the ROS build farm has no CUDA toolchain,
-so the GPU engine is compiled out there. Build from source to get it.
+The packages from the [polka apt repository](#install) have the GPU engine built in. Packages
+from the ROS build farm will be CPU-only: it has no CUDA toolchain.
 
 **Bandwidth.** polka turns N sensor streams into one topic, so downstream nodes subscribe once instead of once per sensor. Voxel downsampling thins that cloud further if you want it, by as much as you set with `leaf_size` — in the demo clip 69k points become 5k, but that is one leaf size, not a fixed ratio or a 0.5.0 speedup.
 
@@ -145,6 +145,21 @@ Odometry reports the rear body; the front lidars ride the steering joint. polka 
 </p>
 
 ## Install
+
+### From apt
+
+CUDA-enabled packages for Humble, Jazzy, Kilted, Lyrical and Rolling (amd64). They need only
+the NVIDIA driver, not the CUDA toolkit, and run on the CPU on machines without a usable GPU.
+Lyrical needs driver 580 or newer, the rest 525 or newer.
+
+```bash
+sudo curl -fsSL https://polka-ros.github.io/polka.gpg -o /usr/share/keyrings/polka.gpg
+echo "deb [signed-by=/usr/share/keyrings/polka.gpg] https://polka-ros.github.io $(. /etc/os-release && echo $VERSION_CODENAME) main" \
+  | sudo tee /etc/apt/sources.list.d/polka.list
+sudo apt update && sudo apt install ros-$ROS_DISTRO-polka
+```
+
+### From source
 
 One branch per ROS 2 distro, same code on each:
 

@@ -54,6 +54,7 @@
 namespace polka {
 
 __device__ bool pass_range(float r2, const GpuFilterParams & f) {
+  if (!f.range_enabled) return true;
   return r2 >= f.min_range_sq && r2 <= f.max_range_sq;
 }
 
@@ -367,6 +368,7 @@ struct CudaMergeEngine::Impl {
 
   GpuFilterParams to_gpu_filter(const FilterParams & fp) {
     GpuFilterParams gf{};
+    gf.range_enabled = fp.range_filter_enabled;
     gf.min_range_sq = static_cast<float>(fp.min_range_sq);
     gf.max_range_sq = static_cast<float>(fp.max_range_sq);
     gf.angular_enabled = fp.angular_filter_enabled;

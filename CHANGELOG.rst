@@ -8,6 +8,7 @@ Changelog for package polka
 * Documentation moved to https://polka-ros.github.io, along with ``doc/`` (pages, images, demo GIFs and the GIF toolchain). The README is now a short entry point. The source package is 21 MB smaller.
 * The CUDA build links the CUDA runtime statically, so it needs only the NVIDIA driver at run time. Adds sm_89 and PTX, so GPUs newer than the listed architectures still run.
 * Fall back to the CPU engine when a GPU is found but can't be set up (seen after suspend/resume: "CUDA-capable device(s) is/are busy or unavailable"). The node used to keep the CUDA engine on failed allocations and log an error on every call. (#62)
+* Fix the CUDA engine clipping every source to ``filters.range.min``/``max`` (default 0.1 to 100 m) even with the range filter disabled. The CPU engine kept those points. (#65)
 
 0.6.0 (2026-10-04)
 ------------------

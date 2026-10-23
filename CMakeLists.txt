@@ -17,7 +17,7 @@ find_package(rclcpp REQUIRED)
 find_package(rclcpp_components REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(tf2_ros REQUIRED)
-find_package(tf2_geometry_msgs REQUIRED)
+find_package(geometry_msgs REQUIRED)
 find_package(tf2_eigen REQUIRED)
 find_package(pcl_conversions REQUIRED)
 find_package(laser_geometry REQUIRED)
@@ -49,7 +49,7 @@ if(WITH_CUDA)
     add_definitions(-DPOLKA_CUDA_ENABLED)
     message(STATUS "polka: CUDA enabled (sm_75, sm_86, sm_87, sm_89 + PTX)")
   else()
-    message(WARNING "polka: CUDA not found, CPU-only build")
+    message(STATUS "polka: CUDA not found, CPU-only build")
     set(WITH_CUDA OFF)
   endif()
 endif()
@@ -85,7 +85,7 @@ target_include_directories(polka_core PUBLIC
 if(COMMAND ament_target_dependencies)
   ament_target_dependencies(polka_core
     rclcpp rclcpp_components sensor_msgs
-    tf2_ros tf2_geometry_msgs tf2_eigen pcl_conversions laser_geometry
+    tf2_ros geometry_msgs tf2_eigen pcl_conversions laser_geometry
     diagnostic_msgs nav_msgs
   )
   if(point_cloud_transport_FOUND)
@@ -97,7 +97,7 @@ else()
     rclcpp_components::component
     ${sensor_msgs_TARGETS}
     tf2_ros::tf2_ros
-    ${tf2_geometry_msgs_TARGETS}
+    ${geometry_msgs_TARGETS}
     tf2_eigen::tf2_eigen
     ${pcl_conversions_TARGETS}
     laser_geometry::laser_geometry

@@ -78,8 +78,10 @@ for distro in "${ALL_DISTROS[@]}"; do
   if [[ $DO_BUILD -eq 1 ]]; then
     bd="${BUILD_DISTRO[$distro]}"
     log "Build-verify '$distro' in osrf/ros:${bd}-desktop"
-    run docker run --rm -v "$PWD/../..:/ws" -w /ws "osrf/ros:${bd}-desktop" \
-      bash -lc "source /opt/ros/${bd}/setup.bash && colcon build --packages-select polka"
+    # Build in the container's /tmp so every distro starts clean. A shared build/ keeps the
+    # previous distro's CMake cache (/opt/ros/<previous>/...) and fails the next one.
+    run docker run --rm -v "$PWD:/src/polka:ro" -w /tmp "osrf/ros:${bd}-desktop" \
+      bash -lc "source /opt/ros/${bd}/setup.bash && colcon build --base-paths /src --packages-select polka"
   fi
 
   if [[ $DO_PUSH -eq 1 ]]; then

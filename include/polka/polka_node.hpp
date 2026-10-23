@@ -15,8 +15,6 @@
 #ifndef POLKA__POLKA_NODE_HPP_
 #define POLKA__POLKA_NODE_HPP_
 
-#include <tf2_ros/buffer.h>
-#include <tf2_ros/transform_listener.h>
 #include <Eigen/Geometry>
 
 #include <chrono>
@@ -40,6 +38,16 @@
 #include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/msg/point_cloud2.hpp>
 #include <sensor_msgs/msg/laser_scan.hpp>
+#if __has_include(<tf2_ros/buffer.hpp>)
+#include <tf2_ros/buffer.hpp>
+#else
+#include <tf2_ros/buffer.h>  // older tf2_ros (Iron, early Humble)
+#endif
+#if __has_include(<tf2_ros/transform_listener.hpp>)
+#include <tf2_ros/transform_listener.hpp>
+#else
+#include <tf2_ros/transform_listener.h>  // older tf2_ros (Iron, early Humble)
+#endif
 
 namespace polka
 {

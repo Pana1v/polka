@@ -23,7 +23,6 @@
 
 #include <gtest/gtest.h>
 #include <Eigen/Geometry>
-#include <tf2_ros/buffer.h>
 
 #include <algorithm>
 #include <chrono>
@@ -49,6 +48,11 @@
 #include <sensor_msgs/point_cloud2_iterator.hpp>
 #include <tf2_eigen/tf2_eigen.hpp>
 #include <tf2_msgs/msg/tf_message.hpp>
+#if __has_include(<tf2_ros/buffer.hpp>)
+#include <tf2_ros/buffer.hpp>
+#else
+#include <tf2_ros/buffer.h>  // older tf2_ros (Iron, early Humble)
+#endif
 
 #include "polka/input/source_adapter.hpp"
 #include "polka/util/se3_exp.hpp"

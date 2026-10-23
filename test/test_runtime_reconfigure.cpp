@@ -13,7 +13,6 @@
 // limitations under the License.
 
 #include <gtest/gtest.h>
-#include <tf2_ros/transform_broadcaster.h>
 
 #include <array>
 #include <chrono>
@@ -26,6 +25,11 @@
 #include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/msg/point_cloud2.hpp>
 #include <sensor_msgs/point_cloud2_iterator.hpp>
+#if __has_include(<tf2_ros/transform_broadcaster.hpp>)
+#include <tf2_ros/transform_broadcaster.hpp>
+#else
+#include <tf2_ros/transform_broadcaster.h>  // older tf2_ros (Iron, early Humble)
+#endif
 
 #include "polka/polka_node.hpp"
 

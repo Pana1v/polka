@@ -23,18 +23,14 @@
 namespace polka
 {
 
-// Whether the output cloud carries the float64 per-point 'time' field.
-enum class PointTimeField { OMIT, INCLUDE };
+// Fields, dimensions and steps of the packed layout (see kPackedStepXYZI in
+// types.hpp) for 'width' x 'height' points. Leaves header and data alone.
+void packed_cloud_layout(
+  PointTimeField time, uint32_t width, uint32_t height, bool is_dense,
+  sensor_msgs::msg::PointCloud2 & msg);
 
-// Packed output layout, the same bytes PCL >= 1.14.1 emits for pcl::toROSMsg:
-//   OMIT:    x y z intensity       (float32)          point_step 16
-//   INCLUDE: x y z intensity time  (float32, float64) point_step 24
-// Older PCL (Humble..Kilted) pads to 32 bytes per point; writing the layout
-// directly halves the payload there and skips the intermediate PCLPointCloud2.
-constexpr uint32_t kPackedStepXYZI = 16;
-constexpr uint32_t kPackedStepXYZIT = 24;
-
-// One pass from the merged cloud into 'msg'. Header is left to the caller.
+// One pass from the merged cloud into 'msg', in the packed layout. Header is
+// left to the caller.
 void cloud_to_msg(
   const CloudT & cloud, PointTimeField time, sensor_msgs::msg::PointCloud2 & msg);
 

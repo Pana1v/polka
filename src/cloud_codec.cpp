@@ -41,12 +41,12 @@ void add_field(
 
 }  // namespace
 
-void cloud_to_msg(
-  const CloudT & cloud, PointTimeField time, sensor_msgs::msg::PointCloud2 & msg)
+void packed_cloud_layout(
+  PointTimeField time, uint32_t width, uint32_t height, bool is_dense,
+  sensor_msgs::msg::PointCloud2 & msg)
 {
   using sensor_msgs::msg::PointField;
   const bool with_time = time == PointTimeField::INCLUDE;
-  const uint32_t step = with_time ? kPackedStepXYZIT : kPackedStepXYZI;
 
   msg.fields.clear();
   add_field(msg, "x", 0, PointField::FLOAT32);
@@ -57,16 +57,26 @@ void cloud_to_msg(
     add_field(msg, "time", 16, PointField::FLOAT64);
   }
 
+  msg.height = height;
+  msg.width = width;
+  msg.is_bigendian = false;
+  msg.is_dense = is_dense;
+  msg.point_step = with_time ? kPackedStepXYZIT : kPackedStepXYZI;
+  msg.row_step = msg.point_step * width;
+}
+
+void cloud_to_msg(
+  const CloudT & cloud, PointTimeField time, sensor_msgs::msg::PointCloud2 & msg)
+{
   // Trust width x height only when it describes every point; otherwise publish
   // the points as one unorganized row so the message is always self-consistent.
   const size_t n = cloud.size();
   const bool organized = static_cast<size_t>(cloud.width) * cloud.height == n;
-  msg.height = organized ? cloud.height : 1;
-  msg.width = organized ? cloud.width : static_cast<uint32_t>(n);
-  msg.is_bigendian = false;
-  msg.is_dense = cloud.is_dense;
-  msg.point_step = step;
-  msg.row_step = step * msg.width;
+  packed_cloud_layout(
+    time, organized ? cloud.width : static_cast<uint32_t>(n), organized ? cloud.height : 1,
+    cloud.is_dense, msg);
+  const bool with_time = time == PointTimeField::INCLUDE;
+  const uint32_t step = msg.point_step;
   msg.data.resize(n * step);
 
   // PointXYZIT: x y z pad (16 B) | intensity | pad | time. Repack without the pads.

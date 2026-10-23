@@ -310,6 +310,30 @@ __global__ void scan_decode_kernel(
   scan_ranges_float[idx] = (val == sentinel) ? __int_as_float(0x7F800000) : __int_as_float(val);
 }
 
+// One thread per point: float4 (x, y, z, intensity) and double time into the
+// packed PointCloud2 layout. 'step' is 16 or 24, so points are only 8-byte
+// aligned: store float2 pairs, never a float4.
+__global__ void pack_cloud_kernel(
+  const float4 * __restrict__ points,
+  const double * __restrict__ point_time,
+  uint8_t * __restrict__ out,
+  int n_points,
+  int step,
+  bool with_time,
+  double time_base)
+{
+  int idx = blockIdx.x * blockDim.x + threadIdx.x;
+  if (idx >= n_points) return;
+
+  uint8_t * o = out + static_cast<size_t>(idx) * step;
+  const float4 p = points[idx];
+  reinterpret_cast<float2 *>(o)[0] = make_float2(p.x, p.y);
+  reinterpret_cast<float2 *>(o)[1] = make_float2(p.z, p.w);
+  if (with_time) {
+    *reinterpret_cast<double *>(o + 16) = point_time[idx] - time_base;
+  }
+}
+
 struct CudaMergeEngine::Impl {
   size_t max_points_per_source = 200000;
   size_t max_total_points = 0;
@@ -342,6 +366,11 @@ struct CudaMergeEngine::Impl {
   double * h_time_out = nullptr;
 
   cudaStream_t stream = nullptr;
+
+  // Where the last merge_pipeline() result lives on the device, for pack_result().
+  const float4 * last_data = nullptr;
+  const double * last_time = nullptr;
+  int last_count = 0;
 
   void release()
   {
@@ -588,6 +617,7 @@ PipelineResult CudaMergeEngine::merge_pipeline(
 {
   auto & s = impl_->stream;
 
+  impl_->last_count = 0;
   POLKA_CUDA_CHECK(cudaMemsetAsync(impl_->d_count_b, 0, sizeof(int), s));
 
   // Pack every source into the preallocated pinned host buffer first (single pass,
@@ -774,7 +804,28 @@ PipelineResult CudaMergeEngine::merge_pipeline(
   output->height = 1;
   output->is_dense = true;
 
+  impl_->last_data = cur_data;
+  impl_->last_time = cur_time;
+  impl_->last_count = cur_count;
   return {output, std::move(scan_ranges)};
+}
+
+cudaStream_t CudaMergeEngine::stream() const
+{
+  return impl_->stream;
+}
+
+void CudaMergeEngine::pack_result(uint8_t * dst, PointTimeField time, double time_base)
+{
+  const int n = impl_->last_count;
+  if (n <= 0) return;
+
+  const bool with_time = time == PointTimeField::INCLUDE;
+  const int step = static_cast<int>(with_time ? kPackedStepXYZIT : kPackedStepXYZI);
+  int blocks = (n + 255) / 256;
+  pack_cloud_kernel<<<blocks, 256, 0, impl_->stream>>>(
+    impl_->last_data, impl_->last_time, dst, n, step, with_time, time_base);
+  POLKA_CUDA_CHECK_KERNEL();
 }
 
 }  // namespace polka

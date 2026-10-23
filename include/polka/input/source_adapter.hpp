@@ -15,7 +15,6 @@
 #ifndef POLKA__INPUT__SOURCE_ADAPTER_HPP_
 #define POLKA__INPUT__SOURCE_ADAPTER_HPP_
 
-#include <tf2_ros/buffer.h>
 #include <Eigen/Core>
 
 #include <functional>
@@ -36,6 +35,11 @@
 #include <sensor_msgs/msg/point_cloud2.hpp>
 #include <sensor_msgs/msg/laser_scan.hpp>
 #include <laser_geometry/laser_geometry.hpp>
+#if __has_include(<tf2_ros/buffer.hpp>)
+#include <tf2_ros/buffer.hpp>
+#else
+#include <tf2_ros/buffer.h>  // older tf2_ros (Iron, early Humble)
+#endif
 
 namespace polka
 {

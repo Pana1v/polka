@@ -127,6 +127,14 @@ polka:
           deadline_ms: 0.0                    # milliseconds (0 = infinite/no deadline)
           lifespan_ms: 0.0                    # milliseconds (0 = infinite/no expiry)
 
+        # Publish the merged cloud straight from GPU memory (ROS 2 Lyrical+ native
+        # buffers: rosidl::Buffer, CUDA backend). Subscribers on the same host that set
+        # acceptable_buffer_backends: "cuda" get the device buffer over CUDA IPC; all
+        # others get an ordinary cloud. Needs polka built with CUDA and cuda_buffer,
+        # the CUDA engine, rmw_fastrtps_cpp and volatile durability. Publishes the raw
+        # topic only (no point_cloud_transport plugins). Read-only.
+        gpu_buffer: false
+
         # Post-merge filters (applied to the merged cloud before publishing)
         # All filters are independent and applied in this order:
         #   range -> angular -> box -> height filter -> footprint filter -> voxel

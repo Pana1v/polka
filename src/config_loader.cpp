@@ -103,6 +103,8 @@ void ConfigLoader::declare_defaults()
   node_->declare_parameter<double>("outputs.cloud.qos.liveliness_lease_duration_ms", 0.0);
   node_->declare_parameter<double>("outputs.cloud.qos.deadline_ms", 0.0);
   node_->declare_parameter<double>("outputs.cloud.qos.lifespan_ms", 0.0);
+  // Read-only: picks the publisher type once, at startup.
+  node_->declare_parameter<bool>("outputs.cloud.gpu_buffer", false, read_only);
   node_->declare_parameter<bool>("outputs.cloud.filters.range.enabled", false);
   node_->declare_parameter<double>("outputs.cloud.filters.range.min", 0.1);
   node_->declare_parameter<double>("outputs.cloud.filters.range.max", 30.0);
@@ -326,6 +328,7 @@ MergeConfig ConfigLoader::read_common_params()
   cfg.cloud_output.enabled = param("outputs.cloud.enabled").as_bool();
   cfg.cloud_output.topic = param("outputs.cloud.topic").as_string();
   cfg.cloud_output.qos = load_output_qos("outputs.cloud.qos");
+  cfg.cloud_output.gpu_buffer = param("outputs.cloud.gpu_buffer").as_bool();
   cfg.cloud_output.filters = load_filter_params("outputs.cloud.filters");
 
   {
@@ -506,6 +509,14 @@ void ConfigLoader::validate(MergeConfig & config, bool allow_pending)
   }
   if (!config.cloud_output.enabled && !config.scan_output.enabled) {
     throw std::runtime_error("polka: at least one output (cloud or scan) must be enabled");
+  }
+  // A GPU buffer is publisher-owned live memory: a late joiner cannot be handed
+  // an old sample, so the CUDA backend only supports volatile topics.
+  if (config.cloud_output.gpu_buffer &&
+    config.cloud_output.qos.durability == "transient_local")
+  {
+    throw std::runtime_error(
+            "polka: outputs.cloud.gpu_buffer needs outputs.cloud.qos.durability: volatile");
   }
   if (config.cloud_output.voxel.enabled) {
     if (config.cloud_output.voxel.leaf_x <= 0.0f ||

@@ -58,6 +58,16 @@ enum class TimestampStrategy { EARLIEST, LATEST, AVERAGE, LOCAL };
 //   ABSOLUTE - raw Unix seconds, as received from the source LiDAR
 enum class PerPointTimeMode { OFFSET, ABSOLUTE };
 
+// Whether the output cloud carries the float64 per-point 'time' field.
+enum class PointTimeField { OMIT, INCLUDE };
+
+// Packed output layout, the same bytes PCL >= 1.14.1 emits for pcl::toROSMsg:
+//   OMIT:    x y z intensity       (float32)          point_step 16
+//   INCLUDE: x y z intensity time  (float32, float64) point_step 24
+// Older PCL (Humble..Kilted) pads to 32 bytes per point.
+constexpr uint32_t kPackedStepXYZI = 16;
+constexpr uint32_t kPackedStepXYZIT = 24;
+
 // Where deskew gets the sensor's translation during a scan.
 //   NONE      - rotation only; for slow ground robots
 //   IMU_ACCEL - 0.5 * a * dt^2 from IMU acceleration; misses steady velocity
@@ -219,6 +229,7 @@ struct CloudOutputConfig
   bool enabled = true;
   std::string topic = "~/merged_cloud";
   OutputQosConfig qos;
+  bool gpu_buffer = false;  // publish from GPU memory (rosidl::Buffer CUDA backend)
   FilterParams filters;
   HeightCapConfig height_cap;
   VoxelConfig voxel;

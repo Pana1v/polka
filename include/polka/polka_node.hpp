@@ -71,6 +71,14 @@ private:
   // Serialize the merged cloud to a message, honouring point_timestamps.enabled
   // (drops the 'time' field when disabled, for a legacy x/y/z/intensity output).
   sensor_msgs::msg::PointCloud2 to_cloud_msg(const CloudT & cloud) const;
+  // Output cloud publisher: point_cloud_transport, or a plain publisher for
+  // outputs.cloud.gpu_buffer, whose device memory transport plugins cannot read.
+  void make_cloud_publisher(const CloudOutputConfig & c);
+  void drop_cloud_publisher();
+  bool has_cloud_publisher() const;
+  void publish_host_cloud(const sensor_msgs::msg::PointCloud2 & msg);
+  // Publishes the GPU pipeline's last result from device memory (gpu_buffer).
+  void publish_device_cloud(size_t count, const rclcpp::Time & stamp);
   void log_startup_banner() const;
   // One-shot check that the node clock and the incoming sensor stamps agree. Emits a
   // single actionable warning when they don't (the classic rosbag-without-sim-time or
@@ -126,6 +134,8 @@ private:
 
   // Output
   CloudPublisher cloud_pub_;
+  rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr device_cloud_pub_;
+  bool device_output_{false};  // outputs.cloud.gpu_buffer requested and usable
   rclcpp::Publisher<sensor_msgs::msg::LaserScan>::SharedPtr scan_pub_;
   rclcpp::TimerBase::SharedPtr output_timer_;
 

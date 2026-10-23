@@ -14,9 +14,7 @@
 
 #include "polka/polka_node.hpp"
 
-#include <pcl_conversions/pcl_conversions.h>
 #include <pcl/console/print.h>
-#include <pcl/common/io.h>
 #ifdef POLKA_CUDA_ENABLED
 #include <cuda_runtime.h>
 #endif
@@ -29,6 +27,7 @@
 #include <stdexcept>
 #include <utility>
 
+#include "polka/util/cloud_codec.hpp"
 #include "polka/util/log_format.hpp"
 #include "polka/util/qos_builder.hpp"
 #include "polka/util/se3_exp.hpp"
@@ -38,6 +37,9 @@
 
 #ifdef POLKA_CUDA_ENABLED
 #include "polka/merge_engine/cuda_merge_engine.hpp"
+#endif
+#ifdef POLKA_CUDA_BUFFER_ENABLED
+#include <cuda_buffer/cuda_buffer_api.hpp>
 #endif
 
 namespace polka
@@ -81,13 +83,33 @@ bool any_source_has_own_imu(const std::vector<SourceConfig> & sources)
     [](const SourceConfig & sc) {return !sc.imu_topic.empty();});
 }
 
+// outputs.cloud.gpu_buffer needs the CUDA engine, in a build that found cuda_buffer
+// (ROS 2 Lyrical or newer). Otherwise say why and keep publishing from host memory.
+bool device_output_usable(
+  const rclcpp::Logger & logger, const CloudOutputConfig & c, const IMergeEngine & engine)
+{
+  if (!c.gpu_buffer) {return false;}
+#ifdef POLKA_CUDA_BUFFER_ENABLED
+  if (engine.is_gpu()) {return true;}
+  RCLCPP_WARN(
+    logger, "polka: outputs.cloud.gpu_buffer needs the CUDA engine; publishing from host memory");
+#else
+  (void)engine;
+  RCLCPP_WARN(
+    logger,
+    "polka: outputs.cloud.gpu_buffer needs polka built with CUDA and cuda_buffer "
+    "(ROS 2 Lyrical or newer); publishing from host memory");
+#endif
+  return false;
+}
+
 }  // namespace
 
 PolkaNode::PolkaNode(const rclcpp::NodeOptions & options)
 : rclcpp::Node("polka", options), config_loader_(this)
 {
   // Our point type carries a 'time' field that source clouds usually lack (they
-  // publish 'timestamp' or nothing), so pcl::fromROSMsg logs a per-message
+  // publish 'timestamp' or nothing), so PCL's field mapping logs a per-message
   // "Failed to find match for field 'time'" warning. populate_point_time fills it
   // explicitly, so silence PCL's redundant warnings (errors still surface).
   pcl::console::setVerbosityLevel(pcl::console::L_ERROR);
@@ -153,9 +175,9 @@ PolkaNode::PolkaNode(const rclcpp::NodeOptions & options)
   output_pipeline_.configure(config_.cloud_output);
   scan_builder_.configure(config_.scan_output, config_.output_rate, config_.output_frame_id);
 
+  device_output_ = device_output_usable(get_logger(), config_.cloud_output, *merge_engine_);
   if (config_.cloud_output.enabled) {
-    cloud_pub_ = create_cloud_publisher(
-      this, config_.cloud_output.topic, build_qos(config_.cloud_output.qos));
+    make_cloud_publisher(config_.cloud_output);
   }
   if (config_.scan_output.enabled) {
     scan_pub_ = create_publisher<sensor_msgs::msg::LaserScan>(
@@ -341,20 +363,19 @@ void PolkaNode::apply_reconfigure()
 
   // Publishers: recreate on topic/QoS change, destroy on disable.
   if (!new_config.cloud_output.enabled) {
-    if (cloud_pub_) {
-      shutdown_cloud_publisher(cloud_pub_);
+    if (has_cloud_publisher()) {
+      drop_cloud_publisher();
       changes.emplace_back("cloud_output=off");
     }
   } else {
-    const bool recreate = !cloud_pub_ ||
+    const bool recreate = !has_cloud_publisher() ||
       new_config.cloud_output.topic != old_config.cloud_output.topic ||
       !qos_equal(new_config.cloud_output.qos, old_config.cloud_output.qos);
     if (recreate) {
       changes.emplace_back(
-        cloud_pub_ ?
+        has_cloud_publisher() ?
         "cloud_output='" + new_config.cloud_output.topic + "'" : "cloud_output=on");
-      cloud_pub_ = create_cloud_publisher(
-        this, new_config.cloud_output.topic, build_qos(new_config.cloud_output.qos));
+      make_cloud_publisher(new_config.cloud_output);
     }
   }
   if (!new_config.scan_output.enabled) {
@@ -680,7 +701,11 @@ void PolkaNode::diag_callback()
 
   OutputReport out;
   out.engine = merge_engine_->is_gpu() ? "CUDA" : "CPU";
-  out.cloud_topic = cloud_pub_ ? cloud_publisher_topic(cloud_pub_) : "";
+  if (device_cloud_pub_) {
+    out.cloud_topic = device_cloud_pub_->get_topic_name();
+  } else {
+    out.cloud_topic = cloud_pub_ ? cloud_publisher_topic(cloud_pub_) : "";
+  }
   out.scan_topic = scan_pub_ ? scan_pub_->get_topic_name() : "";
   out.cloud_rates = cloud_out_window_.update(cloud_out_counters_.sample(), now_steady_sec);
   out.scan_rates = scan_out_window_.update(scan_out_counters_.sample(), now_steady_sec);
@@ -822,13 +847,13 @@ void PolkaNode::output_callback()
     if (config_.suppress_duplicate_timestamps) {return;}
     std::lock_guard<std::mutex> lock(last_data_mutex_);
     if (last_cloud_ && !last_cloud_->empty()) {
-      if (cloud_pub_) {
+      if (has_cloud_publisher()) {
         auto msg = to_cloud_msg(*last_cloud_);
         msg.header.frame_id = config_.output_frame_id;
         msg.header.stamp = last_cloud_stamp_;
         cloud_out_counters_.record(
           msg.data.size() + 72, last_cloud_->size(), last_cloud_->size());
-        publish_cloud(cloud_pub_, msg);
+        publish_host_cloud(msg);
         mark_published();
       }
       if (scan_pub_) {
@@ -925,18 +950,22 @@ void PolkaNode::output_callback()
     if (!result.cloud || result.cloud->empty()) {return;}
 
     last_points_out_ = static_cast<int64_t>(result.cloud->size());
-    if (cloud_pub_) {
+    if (has_cloud_publisher()) {
       if (config_.point_timestamps.enabled &&
         config_.point_timestamps.mode == PerPointTimeMode::OFFSET)
       {
         rebase_point_time(*result.cloud, output_stamp);
       }
-      auto msg = to_cloud_msg(*result.cloud);
-      msg.header.frame_id = config_.output_frame_id;
-      msg.header.stamp = output_stamp;
-      cloud_out_counters_.record(
-        msg.data.size() + 72, result.cloud->size(), result.cloud->size());
-      publish_cloud(cloud_pub_, msg);
+      if (device_output_) {
+        publish_device_cloud(result.cloud->size(), output_stamp);
+      } else {
+        auto msg = to_cloud_msg(*result.cloud);
+        msg.header.frame_id = config_.output_frame_id;
+        msg.header.stamp = output_stamp;
+        cloud_out_counters_.record(
+          msg.data.size() + 72, result.cloud->size(), result.cloud->size());
+        publish_host_cloud(msg);
+      }
       mark_published();
       std::lock_guard<std::mutex> lock(last_data_mutex_);
       last_cloud_ = result.cloud;
@@ -1032,16 +1061,75 @@ void PolkaNode::rebase_point_time(CloudT & cloud, const rclcpp::Time & stamp)
 
 sensor_msgs::msg::PointCloud2 PolkaNode::to_cloud_msg(const CloudT & cloud) const
 {
+  // Without point_timestamps the legacy x/y/z/intensity output is kept, minus 'time'.
   sensor_msgs::msg::PointCloud2 msg;
-  if (config_.point_timestamps.enabled) {
-    pcl::toROSMsg(cloud, msg);  // includes the float64 'time' field
-  } else {
-    // Legacy output: drop 'time', emit x/y/z/intensity exactly as before.
-    pcl::PointCloud<pcl::PointXYZI> xyzi;
-    pcl::copyPointCloud(cloud, xyzi);
-    pcl::toROSMsg(xyzi, msg);
-  }
+  cloud_to_msg(
+    cloud,
+    config_.point_timestamps.enabled ? PointTimeField::INCLUDE : PointTimeField::OMIT,
+    msg);
   return msg;
+}
+
+void PolkaNode::make_cloud_publisher(const CloudOutputConfig & c)
+{
+  if (device_output_) {
+    device_cloud_pub_ = create_publisher<sensor_msgs::msg::PointCloud2>(c.topic, build_qos(c.qos));
+  } else {
+    cloud_pub_ = create_cloud_publisher(this, c.topic, build_qos(c.qos));
+  }
+}
+
+void PolkaNode::drop_cloud_publisher()
+{
+  if (device_cloud_pub_) {
+    device_cloud_pub_.reset();
+  } else {
+    shutdown_cloud_publisher(cloud_pub_);
+  }
+}
+
+bool PolkaNode::has_cloud_publisher() const
+{
+  return device_cloud_pub_ || cloud_pub_;
+}
+
+void PolkaNode::publish_host_cloud(const sensor_msgs::msg::PointCloud2 & msg)
+{
+  if (device_cloud_pub_) {
+    device_cloud_pub_->publish(msg);
+  } else {
+    publish_cloud(cloud_pub_, msg);
+  }
+}
+
+void PolkaNode::publish_device_cloud(size_t count, const rclcpp::Time & stamp)
+{
+#ifdef POLKA_CUDA_BUFFER_ENABLED
+  auto & engine = static_cast<CudaMergeEngine &>(*merge_engine_);
+  const auto & pt = config_.point_timestamps;
+  const auto time = pt.enabled ? PointTimeField::INCLUDE : PointTimeField::OMIT;
+  const double time_base = pt.enabled && pt.mode == PerPointTimeMode::OFFSET ?
+    stamp.seconds() : 0.0;
+
+  auto msg = std::make_unique<sensor_msgs::msg::PointCloud2>();
+  packed_cloud_layout(time, static_cast<uint32_t>(count), 1, true, *msg);
+  msg->header.frame_id = config_.output_frame_id;
+  msg->header.stamp = stamp;
+  msg->data = cuda_buffer_backend::allocate_buffer(count * msg->point_step);
+  {
+    // Releasing the handle records the write on the engine stream, so every
+    // reader (in-process or over CUDA IPC) waits for the pack kernel.
+    auto wh = cuda_buffer_backend::from_output_buffer(msg->data, engine.stream());
+    engine.pack_result(wh.get_ptr(), time, time_base);
+  }
+  // unique_ptr: an intra-process subscriber gets this buffer, not a device copy.
+  cloud_out_counters_.record(msg->data.size() + 72, count, count);
+  device_cloud_pub_->publish(std::move(msg));
+#else
+  (void)count;
+  (void)stamp;
+  throw std::logic_error("polka: device cloud output without cuda_buffer support");
+#endif
 }
 
 void PolkaNode::log_startup_banner() const
@@ -1051,6 +1139,9 @@ void PolkaNode::log_startup_banner() const
   os << "polka: ──────────── started ────────────\n";
   os << "polka:   engine        : " << (merge_engine_->is_gpu() ? "CUDA (full pipeline)" : "CPU")
      << '\n';
+  if (device_output_) {
+    os << "polka:   cloud output  : GPU memory (rosidl::Buffer, cuda backend)\n";
+  }
 
   char rate_buf[32];
   std::snprintf(rate_buf, sizeof(rate_buf), "%6.1f Hz", config_.output_rate);

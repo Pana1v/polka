@@ -14,14 +14,13 @@
 
 #include "polka/input/source_adapter.hpp"
 
-#include <pcl_conversions/pcl_conversions.h>
-
 #include <algorithm>
 #include <cmath>
 #include <cstring>
 #include <string>
 #include <vector>
 
+#include "polka/util/cloud_codec.hpp"
 #include "polka/util/log_format.hpp"
 #include "polka/util/se3_exp.hpp"
 #include "polka/filters/filter_chain.hpp"
@@ -564,7 +563,7 @@ void SourceAdapter::pc2_callback(sensor_msgs::msg::PointCloud2::ConstSharedPtr m
   }
 
   auto cloud = std::make_shared<CloudT>();
-  pcl::fromROSMsg(*msg, *cloud);
+  cloud_from_msg(*msg, *cloud);
 
   // Stamp each point with its absolute acquisition time before any filtering,
   // so the 'time' field survives the same compaction as x/y/z/intensity.
@@ -596,7 +595,7 @@ void SourceAdapter::scan_callback(sensor_msgs::msg::LaserScan::ConstSharedPtr ms
   if (!fields_valid_) {return;}
 
   auto cloud = std::make_shared<CloudT>();
-  pcl::fromROSMsg(pc2_msg, *cloud);
+  cloud_from_msg(pc2_msg, *cloud);
   // Projected scans carry no per-point time; populate falls back to header stamp.
   populate_point_time(*cloud, pc2_msg);
   const uint64_t points_raw = cloud->size();

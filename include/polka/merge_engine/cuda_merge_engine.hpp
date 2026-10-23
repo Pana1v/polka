@@ -17,6 +17,9 @@
 
 #ifdef POLKA_CUDA_ENABLED
 
+#include <cuda_runtime_api.h>
+
+#include <cstdint>
 #include <vector>
 
 #include "polka/merge_engine/i_merge_engine.hpp"
@@ -36,6 +39,12 @@ public:
   PipelineResult merge_pipeline(
     const std::vector<MergeInput> & sources,
     const PipelineConfig & config) override;
+
+  // Device-side output (outputs.cloud.gpu_buffer). The last merge_pipeline()
+  // result stays on the GPU until the next call; pack_result() writes it to 'dst'
+  // in the packed layout (types.hpp), 'time' minus 'time_base', queued on stream().
+  cudaStream_t stream() const;
+  void pack_result(uint8_t * dst, PointTimeField time, double time_base);
 
 private:
   struct Impl;

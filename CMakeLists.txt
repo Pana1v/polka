@@ -57,6 +57,7 @@ endif()
 include_directories(include ${PCL_INCLUDE_DIRS} ${EIGEN3_INCLUDE_DIRS})
 
 set(POLKA_CORE_SOURCES
+  src/cloud_codec.cpp
   src/config_loader.cpp
   src/diag/drift_tracker.cpp
   src/diag/diagnostics_reporter.cpp
@@ -151,6 +152,7 @@ if(BUILD_TESTING)
       test_drift_tracker
       test_gyro_bias
       test_stat_counters
+      test_cloud_codec
       test_config_preview
       test_ouster_timestamps
       test_point_time_decoder

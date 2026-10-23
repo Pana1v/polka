@@ -14,9 +14,7 @@
 
 #include "polka/polka_node.hpp"
 
-#include <pcl_conversions/pcl_conversions.h>
 #include <pcl/console/print.h>
-#include <pcl/common/io.h>
 #ifdef POLKA_CUDA_ENABLED
 #include <cuda_runtime.h>
 #endif
@@ -29,6 +27,7 @@
 #include <stdexcept>
 #include <utility>
 
+#include "polka/util/cloud_codec.hpp"
 #include "polka/util/log_format.hpp"
 #include "polka/util/qos_builder.hpp"
 #include "polka/util/se3_exp.hpp"
@@ -87,7 +86,7 @@ PolkaNode::PolkaNode(const rclcpp::NodeOptions & options)
 : rclcpp::Node("polka", options), config_loader_(this)
 {
   // Our point type carries a 'time' field that source clouds usually lack (they
-  // publish 'timestamp' or nothing), so pcl::fromROSMsg logs a per-message
+  // publish 'timestamp' or nothing), so PCL's field mapping logs a per-message
   // "Failed to find match for field 'time'" warning. populate_point_time fills it
   // explicitly, so silence PCL's redundant warnings (errors still surface).
   pcl::console::setVerbosityLevel(pcl::console::L_ERROR);
@@ -1032,15 +1031,12 @@ void PolkaNode::rebase_point_time(CloudT & cloud, const rclcpp::Time & stamp)
 
 sensor_msgs::msg::PointCloud2 PolkaNode::to_cloud_msg(const CloudT & cloud) const
 {
+  // Without point_timestamps the legacy x/y/z/intensity output is kept, minus 'time'.
   sensor_msgs::msg::PointCloud2 msg;
-  if (config_.point_timestamps.enabled) {
-    pcl::toROSMsg(cloud, msg);  // includes the float64 'time' field
-  } else {
-    // Legacy output: drop 'time', emit x/y/z/intensity exactly as before.
-    pcl::PointCloud<pcl::PointXYZI> xyzi;
-    pcl::copyPointCloud(cloud, xyzi);
-    pcl::toROSMsg(xyzi, msg);
-  }
+  cloud_to_msg(
+    cloud,
+    config_.point_timestamps.enabled ? PointTimeField::INCLUDE : PointTimeField::OMIT,
+    msg);
   return msg;
 }
 

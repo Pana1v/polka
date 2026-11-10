@@ -31,6 +31,12 @@ echo "deb [arch=amd64 signed-by=/usr/share/keyrings/polka.gpg] https://polka-ros
 sudo apt update && sudo apt install ros-${ROS_DISTRO:?source your ROS setup.bash first}-polka
 ```
 
+From the official ROS apt repository (CPU only, the ROS build farm has no CUDA; no extra apt source needed):
+
+```bash
+sudo apt install ros-${ROS_DISTRO:?source your ROS setup.bash first}-polka
+```
+
 From source, using the branch named after your distro:
 
 ```bash

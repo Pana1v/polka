@@ -11,7 +11,7 @@
   <a href="https://polka-ros.github.io/"><img src="https://polka-ros.github.io/images/polka.png" alt="Polka" width="640"/></a>
 </p>
 
-**Multi-LiDAR fusion node for ROS 2.** Merges any mix of PointCloud2 and LaserScan sources into one cloud, one scan, or both, with per-source and output filters, IMU/odometry deskew, and CUDA when an NVIDIA GPU is present. It replaces a relay, filter, transform, merge and downsample chain.
+**Multi-LiDAR fusion node for ROS 2.** Merges any mix of PointCloud2 and LaserScan sources into one cloud, one scan, or both, with per-source and output filters, IMU/odometry deskew, and CUDA when an NVIDIA GPU is present. It replaces a relay, filter, transform, merge and downsample chain. Adapted from my pointcloud_nerger for the ISRO Robotics Challenge 2024.
 
 **Documentation: [polka-ros.github.io][docs]**
 

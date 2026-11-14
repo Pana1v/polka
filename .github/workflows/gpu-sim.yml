@@ -1,0 +1,79 @@
+name: CUDA tests (simulated H100)
+
+# The hosted runners have no GPU, so the CUDA gtests normally skip themselves.
+# This builds polka with CUDA and runs them on a simulated NVIDIA H100
+# (https://github.com/pantheongpu/pantheonsim).
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'src/merge_engine/**'
+      - 'include/**'
+      - 'test/**'
+      - 'CMakeLists.txt'
+      - '.github/workflows/gpu-sim.yml'
+
+concurrency:
+  group: gpu-sim-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  cuda-sim:
+    name: CUDA gtests on a simulated H100
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          path: src/polka
+          persist-credentials: false
+
+      - name: Set up the simulated GPU and CUDA toolkit
+        uses: pantheongpu/setup-pantheonsim@a1b9d4237411f9b2b0e0bb895b4d83377f336a7b # v0.1.9
+        with:
+          gpu: nvidia/h100
+          cuda-toolkit: "13.0"
+
+      - name: Install ROS 2 Jazzy
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends curl ca-certificates gnupg
+          sudo curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key -o /usr/share/keyrings/ros-archive-keyring.gpg
+          echo "deb [arch=amd64 signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] http://packages.ros.org/ros2/ubuntu noble main" | sudo tee /etc/apt/sources.list.d/ros2.list
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ros-jazzy-ros-base ros-dev-tools python3-rosdep python3-colcon-common-extensions
+          sudo rosdep init
+          rosdep update --rosdistro jazzy
+          source /opt/ros/jazzy/setup.bash
+          rosdep install --from-paths src --ignore-src -y --rosdistro jazzy
+
+      # The simulator needs a shared CUDA runtime and PTX device code. polka
+      # links cudart_static and builds sm_75..sm_89 plus compute_89 PTX, so
+      # switch both on the checked-out copy (the project is not changed).
+      - name: Adjust CUDA runtime and architecture
+        run: |
+          sed -i -e 's/CUDA::cudart_static/CUDA::cudart/' \
+                 -e 's/"75;86;87;89;89-virtual"/"90-virtual"/' src/polka/CMakeLists.txt
+          grep -n 'cudart\|CUDA_ARCHITECTURES' src/polka/CMakeLists.txt
+
+      - name: Build
+        run: |
+          source /opt/ros/jazzy/setup.bash
+          vgpu run --preload colcon build --packages-select polka \
+            --parallel-workers 3 --event-handlers console_direct+ \
+            --cmake-args -DWITH_CUDA=ON -DCMAKE_CUDA_RUNTIME_LIBRARY=Shared
+
+      # The two CUDA tests call GTEST_SKIP when no device is found, which
+      # ctest counts as a pass, so fail if either one reports a skip.
+      - name: Test
+        run: |
+          source /opt/ros/jazzy/setup.bash
+          source install/setup.bash
+          vgpu run ctest --test-dir build/polka -R 'cuda' -V --timeout 1800 2>&1 | tee cuda-tests.log
+          test "${PIPESTATUS[0]}" -eq 0
+          ! grep -q 'SKIPPED' cuda-tests.log
+          grep -c '\[       OK \]' cuda-tests.log
